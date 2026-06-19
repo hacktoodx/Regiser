@@ -57,9 +57,8 @@
         // ==========================================
         // ⚠️ 1. แก้ไขค่า 2 บรรทัดนี้ให้เป็นข้อมูลของคุณ
         // ==========================================
-const ADMIN_TG_ID = "7234688831"; // ค้นหา ID ด้วยบอท @userinfobot
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzwpgFr425h5sFIfRcXdnZl_lp1__ir7zTUkR53-Zj8bNtYQ_hO_7qlU6aeIGyYlGsX/exec"; // ลิงก์ที่ได้จากการ Deploy ใน GAS
-
+        const ADMIN_TG_ID = "7234688831"; // ค้นหา ID ด้วยบอท @userinfobot
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwpgFr425h5sFIfRcXdnZl_lp1__ir7zTUkR53-Zj8bNtYQ_hO_7qlU6aeIGyYlGsX/exec"; // ลิงก์ที่ได้จากการ Deploy ใน GAS
 
         // ==========================================
         // ⚠️ 2. ข้อมูล Firebase ของคุณ (ไม่ต้องแก้)
@@ -342,10 +341,18 @@ const ADMIN_TG_ID = "7234688831"; // ค้นหา ID ด้วยบอท @u
             const [pendingTxs, setPendingTxs] = useState([]);
             const [members, setMembers] = useState([]);
 
-            const [tempPageA, setTempPageA] = useState(settings.pageA);
-            const [tempPageB, setTempPageB] = useState(settings.pageB);
-            const [tempPageC, setTempPageC] = useState(settings.pageC);
-            const [tempPageD, setTempPageD] = useState(settings.pageD);
+            const [tempPageA, setTempPageA] = useState('');
+            const [tempPageB, setTempPageB] = useState('');
+            const [tempPageC, setTempPageC] = useState('');
+            const [tempPageD, setTempPageD] = useState('');
+
+            // ซิงค์ค่าการตั้งค่าจาก Firestore เมื่อโหลดข้อมูลสำเร็จ
+            useEffect(() => {
+                setTempPageA(settings.pageA || '');
+                setTempPageB(settings.pageB || '');
+                setTempPageC(settings.pageC || '');
+                setTempPageD(settings.pageD || '');
+            }, [settings]);
 
             useEffect(() => {
                 if(!db) return;
@@ -386,10 +393,14 @@ const ADMIN_TG_ID = "7234688831"; // ค้นหา ID ด้วยบอท @u
             };
 
             const handleSaveSettings = async () => {
-                await db.collection('system').doc('settings').update({
-                    textSettings: { pageA: tempPageA, pageB: tempPageB, pageC: tempPageC, pageD: tempPageD }
-                });
-                alert("บันทึกสำเร็จ");
+                try {
+                    await db.collection('system').doc('settings').update({
+                        textSettings: { pageA: tempPageA, pageB: tempPageB, pageC: tempPageC, pageD: tempPageD }
+                    });
+                    alert("บันทึกสำเร็จ");
+                } catch (e) {
+                    alert("เกิดข้อผิดพลาดในการบันทึก: " + e.message);
+                }
             };
 
             return (
