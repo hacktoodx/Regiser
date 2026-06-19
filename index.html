@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIP Group Subscription</title>
+    
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Tailwind CSS (สไตล์โมเดิร์น โทนขาว-เทา-ดำ) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM UMD -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Firebase SDK (ใช้เวอร์ชัน Compat เพื่อให้เรียกใช้งานแบบ Single-File ได้ง่าย) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <!-- Lucide Icons (สำหรับไอคอนในหน้าเว็บ) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #fafafa;
+            color: #171717;
+        }
+        /* Custom scrollbar สำหรับสไตล์ที่สวยงามขึ้น */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="antialiased select-none">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ==========================================
+        // ⚠️ การตั้งค่าระบบสำคัญ (ระบุข้อมูลของคุณที่นี่)
+        // ==========================================
+        const ADMIN_TG_ID = "7234688831"; // แก้ไขเป็น ID ของคุณเองเพื่อสิทธิ์แอดมิน (ค้นหา ID ด้วย @userinfobot)
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxcGRuxPEiEHumDDJn2LN0H2L3dkKg64mQH094a3aeHW-6HVM-UWBLY32l9-cxTggF5/exec"; // วาง URL หลังจากที่คุณได้สั่ง Deploy จาก Google Apps Script แล้ว
+
+        // Firebase Config ที่ใช้ร่วมกับระบบของคุณ (นำค่าจริงมาวางได้เลย)
+        const firebaseConfig = {
+            apiKey: "AIzaSyAxHBeocnF00uoHiMUqMyY2ZgAx9ALVFQI",
+            authDomain: "hacktood-member.firebaseapp.com",
+            projectId: "hacktood-member",
+            storageBucket: "hacktood-member.firebasestorage.app",
+            messagingSenderId: "67545978384",
+            appId: "1:67545978384:web:5e13a0549263fadb7d5c95",
+            measurementId: "G-Q430JLX5J7"
+        };
+
+        // เริ่มต้นการทำงานของ Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const { useState, useEffect } = React;
+
+        // เมนูดิจิทัลหลักของแอป
+        function App() {
+            const [tgUser, setTgUser] = useState(null);
+            const [role, setRole] = useState('loading'); // loading, guest, member, admin
+            const [userData, setUserData] = useState(null);
+            const [packages, setPackages] = useState([]);
+            const [settings, setSettings] = useState({ pageA: '', pageB: '', pageC: '', pageD: '' });
+            const [loadingText, setLoadingText] = useState('กำลังเชื่อมต่อระบบข้อมูล...');
+
+            useEffect(() => {
+                const tg = window.Telegram.WebApp;
+                tg.expand();
+                
+                // ดึงข้อมูล Telegram User จากระบบ Mini App
+                let user = tg.initDataUnsafe?.user;
+                
+                // สำหรับจำลองบนเบราว์เซอร์ปกติหากเปิดนอก Telegram
+                if (!user) {
+                    user = { id: "12345678", first_name: "ผู้ใช้จำลอง", username: "sandbox_user" };
+                }
+                setTgUser(user);
+
+                // บันทึกสถิติรายวันของการเข้าใช้งานบอท
+                logDailyVisit(user);
+
+                // 1. ตรวจสอบสิทธิ์ผู้ใช้
+                if (user.id.toString() === ADMIN_TG_ID.toString()) {
+                    setRole('admin');
+                } else {
+                    // ติดตามสถานะของสมาชิกล่าสุด
+                    const userRef = db.collection('users').doc(user.id.toString());
+                    userRef.onSnapshot((doc) => {
+                        if (doc.exists) {
+                            const data = doc.data();
+                            // ตรวจสอบสถานะการหมดอายุ
+                            if (data.status === 'active' && data.expiryDate) {
+                                const expiry = data.expiryDate.toDate();
+                                if (expiry > new Date()) {
+                                    setUserData(data);
+                                    setRole('member');
+                                    return;
+                                } else {
+                                    // เปลี่ยนสถานะเป็นหมดอายุในฐานข้อมูล
+                                    userRef.update({ status: 'expired' });
+                                }
+                            }
+                        }
+                        setRole('guest');
+                    });
+                }
+
+                // 2. ดึงการตั้งค่าหน้าข้อความระบบและแพ็กเกจ
+                db.collection('system').doc('settings').onSnapshot(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        setSettings(data.textSettings || {
+                            pageA: 'ยินดีต้อนรับกรุณาเลือกแพ็กเกจเพื่อเข้าร่วมกลุ่ม VIP ของเรา',
+                            pageB: 'ธนาคารกสิกรไทย\nเลขบัญชี: 123-456-789-0\nชื่อบัญชี: แอดมินหลัก',
+                            pageC: 'TrueMoney Wallet\nเบอร์: 08x-xxx-xxxx',
+                            pageD: 'Paypal\nอีเมล: billing@admin.com'
+                        });
+                        setPackages(data.packages || []);
+                    } else {
+                        // สร้างข้อมูลเริ่มต้นในกรณีรันระบบครั้งแรกสุด
+                        const defaultSettings = {
+                            packages: [
+                                { id: "pkg_1", name: "แพ็กเกจเริ่มต้น (30 วัน)", price: 300, days: 30 },
+                                { id: "pkg_2", name: "แพ็กเกจสุดคุ้ม (90 วัน)", price: 800, days: 90 },
+                                { id: "pkg_3", name: "แพ็กเกจสุดพรีเมียม (365 วัน)", price: 2500, days: 365 }
+                            ],
+                            textSettings: {
+                                pageA: 'ยินดีต้อนรับกรุณาเลือกแพ็กเกจเพื่อเข้าร่วมกลุ่ม VIP ของเรา',
+                                pageB: 'ธนาคารกสิกรไทย\nเลขบัญชี: 123-456-789-0\nชื่อบัญชี: แอดมินหลัก',
+                                pageC: 'TrueMoney Wallet\nเบอร์: 08x-xxx-xxxx',
+                                pageD: 'Paypal\nอีเมล: billing@admin.com'
+                            }
+                        };
+                        db.collection('system').doc('settings').set(defaultSettings);
+                    }
+                });
+            }, []);
+
+            // บันทึกจำนวนผู้เข้าชมบอทในวันนี้
+            const logDailyVisit = async (user) => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const statsRef = db.collection('stats').doc(todayStr);
+                
+                db.runTransaction((transaction) => {
+                    return transaction.get(statsRef).then((sfDoc) => {
+                        const visitors = sfDoc.exists ? sfDoc.data().visitors || [] : [];
+                        if (!visitors.includes(user.id.toString())) {
+                            visitors.push(user.id.toString());
+                            transaction.set(statsRef, { 
+                                count: visitors.length, 
+                                visitors: visitors 
+                            }, { merge: true });
+                        }
+                    });
+                }).catch(err => console.log("Stats Log Error", err));
+                
+                // บันทึกฐานข้อมูลผู้ใช้งานทุกคน (User Directory) เพื่อการทำบรอดแคสต์
+                await db.collection('all_users').doc(user.id.toString()).set({
+                    id: user.id.toString(),
+                    name: user.first_name,
+                    username: user.username || 'N/A',
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            };
+
+            if (role === 'loading') {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-50 px-6">
+                        <div className="w-10 h-10 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
+                        <p className="mt-4 text-sm text-neutral-500 font-medium">{loadingText}</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen bg-neutral-50 flex flex-col relative">
+                    {role === 'admin' ? (
+                        <AdminView tgUser={tgUser} packages={packages} settings={settings} />
+                    ) : role === 'member' ? (
+                        <MemberView user={userData} />
+                    ) : (
+                        <GuestView tgUser={tgUser} packages={packages} settings={settings} />
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // ส่วนผู้ใช้ธรรมดาที่ยังไม่เป็นสมาชิก (สมัคร & โอนเงิน)
+        // ==========================================
+        function GuestView({ tgUser, packages, settings }) {
+            const [step, setStep] = useState(1); // 1: แนะนำ, 2: ชำระเงิน, 3: แจ้งสลิป, 4: สรุปผล
+            const [selectedPkg, setSelectedPkg] = useState(null);
+            const [paymentMethod, setPaymentMethod] = useState(''); // bank, wallet, paypal
+            const [slipBase64, setSlipBase64] = useState('');
+            const [slipMeta, setSlipMeta] = useState(null);
+            const [transferTime, setTransferTime] = useState('');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setSlipBase64(reader.result);
+                    setSlipMeta({ name: file.name, type: file.type });
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleRequestJoin = async () => {
+                if (!slipBase64) {
+                    alert("กรุณาแนบภาพสลิปโอนเงินด้วยครับ");
+                    return;
+                }
+                if (!transferTime) {
+                    alert("กรุณาระบุเวลาที่ทำการโอนเงินด้วยครับ");
+                    return;
+                }
+
+                setIsSubmitting(true);
+                try {
+                    // อัปโหลดไฟล์รูปภาพไป Google Drive โดยอ้อมผ่าน Google Apps Script (GAS)
+                    const res = await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'upload_slip',
+                            base64: slipBase64,
+                            mimeType: slipMeta.type,
+                            fileName: `Slip_${tgUser.id}_${Date.now()}`
+                        })
+                    });
+                    
+                    const resJson = await res.json();
+                    
+                    if (!resJson.success) {
+                        throw new Error("อัปโหลดไม่สำเร็จ หรือตั้งค่าเว็บแอป GAS ไม่ถูกต้อง");
+                    }
+
+                    // บันทึกรายการฝากโอนเงินลงบน Firebase
+                    await db.collection('transactions').add({
+                        userId: tgUser.id.toString(),
+                        userName: tgUser.first_name,
+                        username: tgUser.username || '',
+                        package: selectedPkg,
+                        paymentMethod: paymentMethod,
+                        slipUrl: resJson.fileUrl,
+                        transferTime: transferTime,
+                        status: 'pending',
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    setStep(4);
+                } catch (error) {
+                    alert("เกิดข้อผิดพลาดในการทำรายการ: " + error.message);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            return (
+                <div className="flex-1 flex flex-col p-5">
+                    {/* ส่วนหัว */}
+                    <div className="text-center my-6">
+                        <div className="inline-block bg-black text-white p-3 rounded-full mb-3 shadow-inner">
+                            <i data-lucide="crown" class="w-6 h-6"></i>
+                        </div>
+                        <h1 className="text-xl font-extrabold uppercase tracking-wide">VIP CLUB MEMBER</h1>
+                        <p className="text-xs text-neutral-500 mt-1 uppercase font-medium">Auto Subscription System</p>
+                    </div>
+
+                    {step === 1 && (
+                        <div className="flex-1 flex flex-col">
+                            <div className="bg-white border border-neutral-200/60 p-4 rounded-xl text-sm text-neutral-600 mb-6 leading-relaxed">
+                                {settings.pageA || "กรุณาคลิกเลือกแพ็กเกจที่คุณชอบด้านล่างนี้ และทำตามขั้นตอนการชำระเงินเพื่อเข้าสู่ระบบกลุ่ม VIP ทันที"}
+                            </div>
+                            <div className="space-y-3 flex-1">
+                                {packages.map(pkg => (
+                                    <div key={pkg.id} 
+                                        onClick={() => { setSelectedPkg(pkg); setStep(2); }}
+                                        className="bg-white border-2 border-neutral-200 hover:border-black p-4 rounded-xl flex justify-between items-center transition-all cursor-pointer shadow-sm active:scale-[0.98]"
+                                    >
+                                        <div>
+                                            <div className="font-bold text-neutral-900">{pkg.name}</div>
+                                            <div className="text-xs text-neutral-500 mt-1">สิทธิ์การเข้าใช้งานกลุ่ม VIP {pkg.days} วัน</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-extrabold text-lg text-black">{pkg.price} ฿</div>
+                                            <span className="text-[10px] uppercase text-neutral-400 font-semibold">คลิกเพื่อเลือก</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {step === 2 && (
+                        <div className="flex-1 flex flex-col">
+                            <div className="mb-4">
+                                <button onClick={() => setStep(1)} className="flex items-center text-xs text-neutral-500 hover:text-black">
+                                    <i data-lucide="arrow-left" class="w-3.5 h-3.5 mr-1"></i> ย้อนกลับ
+                                </button>
+                            </div>
+                            <div className="bg-black text-white p-4 rounded-xl mb-4 text-center">
+                                <span className="text-xs opacity-75 uppercase">แพ็กเกจที่เลือก</span>
+                                <h3 className="font-bold text-lg">{selectedPkg?.name}</h3>
+                                <div className="text-2xl font-black mt-1">{selectedPkg?.price} ฿</div>
+                            </div>
+
+                            <p className="text-xs text-neutral-400 font-bold uppercase mb-2">โปรดเลือกช่องทางชำระเงิน</p>
+                            <div className="space-y-3 mb-6">
+                                <div onClick={() => { setPaymentMethod('bank'); setStep(3); }} className="p-4 bg-white border border-neutral-200 rounded-xl flex items-center justify-between cursor-pointer hover:bg-neutral-50 active:scale-95 transition-all">
+                                    <div className="flex items-center">
+                                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg mr-3"><i data-lucide="credit-card" class="w-5 h-5"></i></div>
+                                        <span className="font-bold text-sm text-neutral-800">โอนผ่านบัญชีธนาคาร (หน้า B)</span>
+                                    </div>
+                                    <i data-lucide="chevron-right" class="w-4 h-4 text-neutral-400"></i>
+                                </div>
+                                <div onClick={() => { setPaymentMethod('wallet'); setStep(3); }} className="p-4 bg-white border border-neutral-200 rounded-xl flex items-center justify-between cursor-pointer hover:bg-neutral-50 active:scale-95 transition-all">
+                                    <div className="flex items-center">
+                                        <div className="p-2 bg-orange-50 text-orange-600 rounded-lg mr-3"><i data-lucide="smartphone" class="w-5 h-5"></i></div>
+                                        <span className="font-bold text-sm text-neutral-800">โอนทรูมันนี่วอลเล็ต (หน้า C)</span>
+                                    </div>
+                                    <i data-lucide="chevron-right" class="w-4 h-4 text-neutral-400"></i>
+                                </div>
+                                <div onClick={() => { setPaymentMethod('paypal'); setStep(3); }} className="p-4 bg-white border border-neutral-200 rounded-xl flex items-center justify-between cursor-pointer hover:bg-neutral-50 active:scale-95 transition-all">
+                                    <div className="flex items-center">
+                                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg mr-3"><i data-lucide="globe" class="w-5 h-5"></i></div>
+                                        <span className="font-bold text-sm text-neutral-800">ชำระผ่าน Paypal (หน้า D)</span>
+                                    </div>
+                                    <i data-lucide="chevron-right" class="w-4 h-4 text-neutral-400"></i>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {step === 3 && (
+                        <div className="flex-1 flex flex-col">
+                            <div className="mb-4">
+                                <button onClick={() => setStep(2)} className="flex items-center text-xs text-neutral-500 hover:text-black">
+                                    <i data-lucide="arrow-left" class="w-3.5 h-3.5 mr-1"></i> เลือกช่องทางอื่น
+                                </button>
+                            </div>
+
+                            {/* รายละเอียดช่องทางชำระเงิน */}
+                            <div className="bg-white border border-neutral-200 p-5 rounded-xl mb-4 shadow-sm">
+                                <h4 className="text-xs font-bold uppercase text-neutral-400 mb-2">รายละเอียดการโอนเงิน</h4>
+                                <div className="text-sm whitespace-pre-line text-neutral-800 font-semibold leading-relaxed">
+                                    {paymentMethod === 'bank' && (settings.pageB || "ข้อมูลธนาคารเพื่อการโอนชำระ")}
+                                    {paymentMethod === 'wallet' && (settings.pageC || "ข้อมูลบัญชีทรูมันนี่วอลเล็ต")}
+                                    {paymentMethod === 'paypal' && (settings.pageD || "ลิงก์หรืออีเมลสำหรับรับ Paypal")}
+                                </div>
+                            </div>
+
+                            {/* แนบรูปและกรอกเวลา */}
+                            <div className="bg-white border border-neutral-200 p-5 rounded-xl space-y-4 shadow-sm">
+                                <h4 className="text-xs font-bold uppercase text-neutral-400">ยืนยันหลักฐานการชำระเงิน</h4>
+                                
+                                <div>
+                                    <label className="block text-xs font-semibold text-neutral-600 mb-2">อัปโหลดสลิปการโอนเงิน</label>
+                                    <div className="flex items-center justify-center w-full">
+                                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-300 border-dashed rounded-lg cursor-pointer hover:bg-neutral-50">
+                                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                                <i data-lucide="image" class="w-8 h-8 text-neutral-400 mb-1"></i>
+                                                <p className="text-xs text-neutral-500">
+                                                    {slipMeta ? slipMeta.name : "คลิกเลือกรูปถ่ายหรือรูปสลิปจากอัลบั้ม"}
+                                                </p>
+                                            </div>
+                                            <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-neutral-600 mb-2">เวลาที่ทำการโอนเงิน (จากสลิป)</label>
+                                    <input 
+                                        type="time" 
+                                        value={transferTime}
+                                        onChange={(e) => setTransferTime(e.target.value)}
+                                        className="w-full border border-neutral-200 p-2.5 rounded-lg text-sm font-semibold focus:outline-none focus:border-black"
+                                    />
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={handleRequestJoin} 
+                                disabled={isSubmitting}
+                                className="w-full bg-black text-white py-3 rounded-lg font-bold text-sm mt-6 hover:bg-neutral-800 active:scale-95 transition-all shadow disabled:bg-neutral-400"
+                            >
+                                {isSubmitting ? "กำลังดำเนินการอัปโหลด..." : "ส่งรายละเอียดการสมัครสมาชิก"}
+                            </button>
+                        </div>
+                    )}
+
+                    {step === 4 && (
+                        <div className="flex-1 flex flex-col justify-center items-center text-center p-6 bg-white border border-neutral-200 rounded-xl my-6">
+                            <div className="w-16 h-16 bg-neutral-100 rounded-full flex items-center justify-center text-neutral-900 mb-4 animate-bounce">
+                                <i data-lucide="check-circle" class="w-10 h-10"></i>
+                            </div>
+                            <h2 className="text-lg font-bold text-neutral-900">บันทึกข้อมูลเรียบร้อยแล้ว</h2>
+                            <p className="text-sm text-neutral-500 mt-2 leading-relaxed">
+                                ระบบได้ส่งหลักฐานสลิปการชำระเงินและข้อมูลสมัคร VIP ของคุณไปให้ทีมงานตรวจสอบเรียบร้อยแล้ว กรุณารอรับข้อความทางแชทของ Telegram จากบอทเพื่อรับลิงก์เข้าร่วมกลุ่มเมื่อได้รับการอนุมัติจากแอดมินครับ
+                            </p>
+                            <button onClick={() => window.Telegram.WebApp.close()} className="mt-8 bg-neutral-900 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-black">
+                                ปิดหน้าต่างนี้
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // ส่วนของสมาชิกที่อนุมัติเรียบร้อยแล้ว (Member Dashboard)
+        // ==========================================
+        function MemberView({ user }) {
+            const [expiryDateText, setExpiryDateText] = useState('');
+            const [daysRemaining, setDaysRemaining] = useState(0);
+
+            useEffect(() => {
+                if (user && user.expiryDate) {
+                    const expiry = user.expiryDate.toDate();
+                    setExpiryDateText(expiry.toLocaleDateString('th-TH', { 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                    }) + ' เวลา ' + expiry.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }));
+                    
+                    const timeDiff = expiry.getTime() - new Date().getTime();
+                    const days = Math.ceil(timeDiff / (1000 * 3600 * 24));
+                    setDaysRemaining(days > 0 ? days : 0);
+                }
+            }, [user]);
+
+            return (
+                <div className="flex-1 flex flex-col p-5 justify-center">
+                    <div className="bg-white border-2 border-black rounded-2xl p-6 shadow-md relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-neutral-100 rounded-full translate-x-8 -translate-y-8 flex items-end justify-start p-6">
+                            <i data-lucide="shield-check" class="w-8 h-8 text-black"></i>
+                        </div>
+                        
+                        <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wider">VIP MEMBER PASS</span>
+                        <h2 className="text-2xl font-black text-neutral-950 mt-1">{user?.name}</h2>
+                        
+                        <div className="my-8 text-center bg-neutral-50 p-4 rounded-xl border border-neutral-100">
+                            <span className="text-xs text-neutral-400 font-semibold uppercase">ระยะเวลาการเป็นสมาชิกคงเหลือ</span>
+                            <div className="text-4xl font-extrabold text-neutral-900 mt-1">{daysRemaining} วัน</div>
+                        </div>
+
+                        <div className="space-y-3 text-xs text-neutral-600 border-t pt-4">
+                            <div className="flex justify-between">
+                                <span className="font-semibold text-neutral-400">แพ็กเกจปัจจุบัน</span>
+                                <span className="font-bold text-neutral-800">{user?.package?.name}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="font-semibold text-neutral-400">หมดอายุเมื่อ</span>
+                                <span className="font-bold text-neutral-800">{expiryDateText}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="font-semibold text-neutral-400">สถานะสมาชิก</span>
+                                <span className="px-2 py-0.5 bg-black text-white text-[10px] font-bold rounded uppercase">Active</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // ส่วนของหลังบ้านจัดการระบบ (Admin View)
+        // ==========================================
+        function AdminView({ tgUser, packages, settings }) {
+            const [activeTab, setActiveTab] = useState('pending'); // pending, members, settings, broadcast, dashboard
+            const [pendingTxs, setPendingTxs] = useState([]);
+            const [members, setMembers] = useState([]);
+            const [allUsersCount, setAllUsersCount] = useState(0);
+            const [broadcastMsg, setBroadcastMsg] = useState('');
+            const [broadcastGroup, setBroadcastGroup] = useState('all'); // all, guest, active, expired
+            const [isBroadcasting, setIsBroadcasting] = useState(false);
+            
+            // ข้อมูล Dashboard
+            const [statsCount, setStatsCount] = useState(0);
+            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+            // บัญชีข้อความที่จำลองเอาไว้แก้ทางหน้าแอป
+            const [tempPageA, setTempPageA] = useState(settings.pageA);
+            const [tempPageB, setTempPageB] = useState(settings.pageB);
+            const [tempPageC, setTempPageC] = useState(settings.pageC);
+            const [tempPageD, setTempPageD] = useState(settings.pageD);
+
+            useEffect(() => {
+                // อัปเดต State ค่าเริ่มต้นชั่วคราวจาก Propsettings
+                setTempPageA(settings.pageA);
+                setTempPageB(settings.pageB);
+                setTempPageC(settings.pageC);
+                setTempPageD(settings.pageD);
+            }, [settings]);
+
+            useEffect(() => {
+                // โหลดสถิติรายการโอนเงินที่ค้างอยู่ (Pending)
+                const unsubTxs = db.collection('transactions').onSnapshot(snap => {
+                    const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setPendingTxs(list.filter(t => t.status === 'pending'));
+                });
+
+                // โหลดสถิติรายชื่อสมาชิก
+                const unsubMembers = db.collection('users').onSnapshot(snap => {
+                    setMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+
+                // นับจำนวน User ที่เคยคุยกับบอททั้งหมด
+                const unsubAllUsers = db.collection('all_users').onSnapshot(snap => {
+                    setAllUsersCount(snap.size);
+                });
+
+                return () => { unsubTxs(); unsubMembers(); unsubAllUsers(); };
+            }, []);
+
+            useEffect(() => {
+                // ดึงสถิติจำนวนคนเข้าบอทรายวันตามวันที่เลือก
+                const unsubStats = db.collection('stats').doc(selectedDate).onSnapshot(doc => {
+                    if (doc.exists) {
+                        setStatsCount(doc.data().count || 0);
+                    } else {
+                        setStatsCount(0);
+                    }
+                });
+                return () => unsubStats();
+            }, [selectedDate]);
+
+            // อนุมัติสลิปสมาชิก
+            const handleApprove = async (tx) => {
+                const isConfirmed = confirm(`คุณต้องการอนุมัติการสมัครสมาชิกของ ${tx.userName} หรือไม่?\nระบบจะสร้างลิงก์เชิญพิเศษและส่งไปทางแชทของเขาโดยอัตโนมัติ`);
+                if (!isConfirmed) return;
+
+                try {
+                    // 1. เรียกหลังบ้าน GAS เพื่อสร้างลิงก์เชิญและส่งแชทให้สมาชิก
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ 
+                            action: 'approve', 
+                            tgUserId: tx.userId 
+                        })
+                    });
+                    
+                    const resJson = await response.json();
+                    if (!resJson.success) throw new Error(resJson.error || "GAS Endpoint failed");
+
+                    // 2. อัปเดตสถานะของบิลการชำระเงินใน Firestore
+                    await db.collection('transactions').doc(tx.id).update({ 
+                        status: 'approved',
+                        approvedBy: tgUser.first_name,
+                        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    // 3. ปรับสิทธิ์ผู้ใช้เป็นสมาชิก VIP และตั้งค่าวันหมดอายุ
+                    const expiry = new Date();
+                    expiry.setDate(expiry.getDate() + parseInt(tx.package.days));
+
+                    await db.collection('users').doc(tx.userId).set({
+                        userId: tx.userId,
+                        name: tx.userName,
+                        username: tx.username || '',
+                        status: 'active',
+                        package: tx.package,
+                        joinDate: firebase.firestore.FieldValue.serverTimestamp(),
+                        expiryDate: expiry
+                    }, { merge: true });
+
+                    alert("อนุมัติเสร็จสมบูรณ์เรียบร้อย!");
+                } catch (err) {
+                    alert("อนุมัติผิดพลาด: " + err.message);
+                }
+            };
+
+            // ปฏิเสธสลิปสมาชิก
+            const handleReject = async (tx) => {
+                const reason = prompt("กรุณาระบุเหตุผลการปฏิเสธ (ระบบจะส่งข้อความแจ้งเตือนผู้ใช้ด้วย):", "สลิปและข้อมูลการโอนเงินไม่ตรงตามเงื่อนไข");
+                if (reason === null) return; // กดยกเลิกใน Prompt
+
+                try {
+                    // 1. แจ้งผู้ใช้ผ่านบอทว่าไม่ผ่าน
+                    await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ 
+                            action: 'reject', 
+                            tgUserId: tx.userId,
+                            reason: reason
+                        })
+                    });
+
+                    // 2. อัปเดตสถานะธุรกรรม
+                    await db.collection('transactions').doc(tx.id).update({ 
+                        status: 'rejected',
+                        rejectReason: reason,
+                        rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    alert("ส่งข้อความปฏิเสธไปยังผู้ใช้แล้ว");
+                } catch (err) {
+                    alert("เกิดข้อผิดพลาด: " + err.message);
+                }
+            };
+
+            // แก้ไขข้อความจำลองที่จะแสดงในหน้า A B C D
+            const handleSaveSettings = async () => {
+                try {
+                    await db.collection('system').doc('settings').update({
+                        textSettings: {
+                            pageA: tempPageA,
+                            pageB: tempPageB,
+                            pageC: tempPageC,
+                            pageD: tempPageD
+                        }
+                    });
+                    alert("บันทึกการตั้งค่าข้อความแสดงผลสำเร็จ!");
+                } catch (err) {
+                    alert("เกิดข้อผิดพลาด: " + err.message);
+                }
+            };
+
+            // จัดการปรับวันหมดอายุสมาชิกด้วยตนเอง (Manual Update)
+            const handleEditExpiry = async (member) => {
+                const newDays = prompt(`ระบุจำนวนวันที่ต้องการเพิ่ม/ลด ให้แก่สมาชิก ${member.name} (ใส่จำนวนวันเป็นตัวเลข เช่น 30 เพื่อบวกเพิ่ม หรือติดลบเพื่อลดวัน):`);
+                if (!newDays || isNaN(newDays)) return;
+
+                try {
+                    const currentExpiry = member.expiryDate ? member.expiryDate.toDate() : new Date();
+                    const newExpiry = new Date(currentExpiry);
+                    newExpiry.setDate(newExpiry.getDate() + parseInt(newDays));
+
+                    await db.collection('users').doc(member.id).update({
+                        expiryDate: newExpiry,
+                        status: newExpiry > new Date() ? 'active' : 'expired'
+                    });
+                    alert("อัปเดตวันหมดอายุเรียบร้อยแล้ว!");
+                } catch (err) {
+                    alert("อัปเดตล้มเหลว: " + err.message);
+                }
+            };
+
+            // สั่งบรอดแคสต์ข้อความ
+            const handleSendBroadcast = async () => {
+                if (!broadcastMsg) {
+                    alert("กรุณากรอกข้อความที่จะใช้บรอดแคสต์ด้วยครับ");
+                    return;
+                }
+
+                const isConfirmed = confirm(`คุณกำลังจะจัดส่งข้อความนี้หาผู้ใช้ประเภท: [${broadcastGroup.toUpperCase()}] ทั้งหมดในระบบ ยืนยันการส่งข้อความหรือไม่?`);
+                if (!isConfirmed) return;
+
+                setIsBroadcasting(true);
+                try {
+                    let targetUserIds = [];
+
+                    if (broadcastGroup === 'all') {
+                        const snap = await db.collection('all_users').get();
+                        targetUserIds = snap.docs.map(doc => doc.id);
+                    } else if (broadcastGroup === 'active') {
+                        const snap = await db.collection('users').where('status', '==', 'active').get();
+                        targetUserIds = snap.docs.map(doc => doc.id);
+                    } else if (broadcastGroup === 'expired') {
+                        const snap = await db.collection('users').where('status', '==', 'expired').get();
+                        targetUserIds = snap.docs.map(doc => doc.id);
+                    } else { // guest (ผู้ใช้ที่ยังไม่เคยสมัคร)
+                        const allUsersSnap = await db.collection('all_users').get();
+                        const membersSnap = await db.collection('users').get();
+                        const memberIds = membersSnap.docs.map(doc => doc.id);
+                        allUsersSnap.docs.forEach(doc => {
+                            if (!memberIds.includes(doc.id)) {
+                                targetUserIds.push(doc.id);
+                            }
+                        });
+                    }
+
+                    if (targetUserIds.length === 0) {
+                        alert("ไม่พบกลุ่มเป้าหมายที่จะจัดส่งข้อความ");
+                        setIsBroadcasting(false);
+                        return;
+                    }
+
+                    // ยิงส่ง API ไปที่ GAS
+                    const res = await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'broadcast',
+                            users: targetUserIds,
+                            message: broadcastMsg
+                        })
+                    });
+
+                    const resJson = await res.json();
+                    alert(`ส่งบรอดแคสต์เรียบร้อยแล้ว! ส่งผ่านบอทสำเร็จ ${resJson.sentCount || 0} จากผู้ใช้ ${targetUserIds.length} ราย`);
+                    setBroadcastMsg('');
+                } catch (err) {
+                    alert("เกิดข้อผิดพลาดในการบรอดแคสต์: " + err.message);
+                } finally {
+                    setIsBroadcasting(false);
+                }
+            };
+
+            return (
+                <div className="flex-1 flex flex-col">
+                    {/* Header ของแอดมิน */}
+                    <div className="bg-black text-white px-5 py-4 flex items-center justify-between">
+                        <div>
+                            <span className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">VIP SYSTEM ADMIN</span>
+                            <h2 className="text-base font-black">จัดการหลังบ้าน</h2>
+                        </div>
+                        <div className="flex space-x-1">
+                            <span className="text-xs bg-neutral-800 px-2 py-1 rounded text-neutral-300 font-medium">{tgUser?.first_name}</span>
+                        </div>
+                    </div>
+
+                    {/* เมนูแถบแท็บ (Tabs) */}
+                    <div className="flex border-b border-neutral-200 overflow-x-auto bg-white sticky top-0 z-10">
+                        <button onClick={() => setActiveTab('pending')} className={`flex-1 min-w-[80px] p-3 text-[11px] font-bold uppercase transition-all ${activeTab === 'pending' ? 'border-b-2 border-black text-black' : 'text-neutral-400'}`}>
+                            รออนุมัติ ({pendingTxs.length})
+                        </button>
+                        <button onClick={() => setActiveTab('members')} className={`flex-1 min-w-[80px] p-3 text-[11px] font-bold uppercase transition-all ${activeTab === 'members' ? 'border-b-2 border-black text-black' : 'text-neutral-400'}`}>
+                            สมาชิก ({members.filter(m => m.status === 'active').length})
+                        </button>
+                        <button onClick={() => setActiveTab('settings')} className={`flex-1 min-w-[80px] p-3 text-[11px] font-bold uppercase transition-all ${activeTab === 'settings' ? 'border-b-2 border-black text-black' : 'text-neutral-400'}`}>
+                            ตั้งค่าแอป
+                        </button>
+                        <button onClick={() => setActiveTab('broadcast')} className={`flex-1 min-w-[80px] p-3 text-[11px] font-bold uppercase transition-all ${activeTab === 'broadcast' ? 'border-b-2 border-black text-black' : 'text-neutral-400'}`}>
+                            บรอดแคสต์
+                        </button>
+                        <button onClick={() => setActiveTab('dashboard')} className={`flex-1 min-w-[80px] p-3 text-[11px] font-bold uppercase transition-all ${activeTab === 'dashboard' ? 'border-b-2 border-black text-black' : 'text-neutral-400'}`}>
+                            แดชบอร์ด
+                        </button>
+                    </div>
+
+                    {/* รายละเอียดเนื้อหาข้อมูลแต่ละแท็บ */}
+                    <div className="p-4 flex-1">
+                        
+                        {/* 1. รายการรออนุมัติ */}
+                        {activeTab === 'pending' && (
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-bold text-neutral-800 mb-3">รายการแจ้งหลักฐานรอแอดมินยืนยัน</h3>
+                                {pendingTxs.map(tx => (
+                                    <div key={tx.id} className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm space-y-3">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <h4 className="font-extrabold text-neutral-900">{tx.userName}</h4>
+                                                <span className="text-[10px] text-neutral-400 font-bold">ID: {tx.userId} | @{tx.username || "N/A"}</span>
+                                            </div>
+                                            <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase">Pending</span>
+                                        </div>
+
+                                        <div className="bg-neutral-50 p-2.5 rounded text-xs space-y-1 text-neutral-600 font-semibold">
+                                            <div className="flex justify-between"><span>แพ็กเกจที่เลือก:</span><span className="text-black font-bold">{tx.package?.name} ({tx.package?.price} ฿)</span></div>
+                                            <div className="flex justify-between"><span>ช่องทางการโอน:</span><span className="text-black uppercase">{tx.paymentMethod}</span></div>
+                                            <div className="flex justify-between"><span>เวลาโอนตามสลิป:</span><span className="text-neutral-900 font-extrabold">{tx.transferTime} น.</span></div>
+                                        </div>
+
+                                        {tx.slipUrl && (
+                                            <div className="border border-neutral-200 rounded-lg overflow-hidden">
+                                                <a href={tx.slipUrl} target="_blank" rel="noopener noreferrer" className="block text-center py-2 bg-neutral-100 text-xs font-bold hover:bg-neutral-200">
+                                                    🔍 คลิกดูไฟล์ภาพสลิปขนาดเต็ม
+                                                </a>
+                                            </div>
+                                        )}
+
+                                        <div className="flex space-x-2 pt-2">
+                                            <button onClick={() => handleApprove(tx)} className="flex-1 bg-black text-white text-xs font-bold py-2.5 rounded-lg active:scale-95 transition-all">
+                                                อนุมัติเข้ากลุ่ม
+                                            </button>
+                                            <button onClick={() => handleReject(tx)} className="flex-1 bg-red-500 text-white text-xs font-bold py-2.5 rounded-lg active:scale-95 transition-all">
+                                                ปฏิเสธ
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {pendingTxs.length === 0 && (
+                                    <div className="text-center py-12 text-neutral-400 text-sm">ไม่มีรายการโอนเงินใหม่ค้างอยู่</div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* 2. จัดการสมาชิก */}
+                        {activeTab === 'members' && (
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-bold text-neutral-800">รายชื่อสมาชิกที่ใช้งานอยู่ ({members.filter(m => m.status === 'active').length})</h3>
+                                <div className="space-y-2">
+                                    {members.map(member => (
+                                        <div key={member.id} className="bg-white border border-neutral-200 p-3 rounded-lg flex justify-between items-center">
+                                            <div>
+                                                <div className="font-bold text-sm text-neutral-900">{member.name}</div>
+                                                <div className="text-[10px] text-neutral-400">หมดอายุ: {member.expiryDate ? member.expiryDate.toDate().toLocaleDateString('th-TH') : "N/A"}</div>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${member.status === 'active' ? 'bg-neutral-900 text-white' : 'bg-red-100 text-red-800'}`}>
+                                                    {member.status}
+                                                </span>
+                                                <button onClick={() => handleEditExpiry(member)} className="p-1.5 border hover:bg-neutral-50 rounded">
+                                                    ⚙️ ปรับวันหมดอายุ
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {members.length === 0 && (
+                                        <p className="text-center py-6 text-neutral-400 text-xs">ยังไม่มีสมาชิกที่เปิดใช้งานอยู่</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 3. ตั้งค่าระบบแอปข้อความ (หน้า A, B, C, D) */}
+                        {activeTab === 'settings' && (
+                            <div className="bg-white border border-neutral-200 p-5 rounded-xl space-y-4 shadow-sm">
+                                <h3 className="text-sm font-bold text-neutral-800">ตั้งค่าข้อความใน Mini App</h3>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ข้อความแนะนำแพ็กเกจ (หน้า A)</label>
+                                    <textarea value={tempPageA} onChange={(e) => setTempPageA(e.target.value)} rows="3" className="w-full border border-neutral-200 p-2 rounded text-sm focus:outline-none focus:border-black" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ข้อมูลช่องทางโอนผ่านธนาคาร (หน้า B)</label>
+                                    <textarea value={tempPageB} onChange={(e) => setTempPageB(e.target.value)} rows="3" className="w-full border border-neutral-200 p-2 rounded text-sm focus:outline-none focus:border-black" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ข้อมูลทรูมันนี่วอลเล็ต (หน้า C)</label>
+                                    <textarea value={tempPageC} onChange={(e) => setTempPageC(e.target.value)} rows="3" className="w-full border border-neutral-200 p-2 rounded text-sm focus:outline-none focus:border-black" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ข้อมูล Paypal (หน้า D)</label>
+                                    <textarea value={tempPageD} onChange={(e) => setTempPageD(e.target.value)} rows="3" className="w-full border border-neutral-200 p-2 rounded text-sm focus:outline-none focus:border-black" />
+                                </div>
+
+                                <button onClick={handleSaveSettings} className="w-full bg-black text-white font-bold py-2.5 rounded-lg text-sm mt-4 active:scale-95 transition-all">
+                                    บันทึกข้อมูลการตั้งค่าทั้งหมด
+                                </button>
+                            </div>
+                        )}
+
+                        {/* 4. ระบบบรอดแคสต์ส่งข้อความหาคนจำนวนมาก */}
+                        {activeTab === 'broadcast' && (
+                            <div className="bg-white border border-neutral-200 p-5 rounded-xl space-y-4 shadow-sm">
+                                <h3 className="text-sm font-bold text-neutral-800">บรอดแคสต์ส่งข่าวสารผ่านบอท</h3>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ส่งถึงผู้ใช้งานกลุ่มใด?</label>
+                                    <select value={broadcastGroup} onChange={(e) => setBroadcastGroup(e.target.value)} className="w-full border border-neutral-200 p-2 rounded-lg text-sm">
+                                        <option value="all">ผู้ใช้บอททั้งหมด ({allUsersCount} ราย)</option>
+                                        <option value="guest">คนที่ยังไม่เคยสมัคร (ยังไม่เป็นสมาชิก)</option>
+                                        <option value="active">คนที่เป็นสมาชิก VIP อยู่ในกลุ่มปัจจุบัน</option>
+                                        <option value="expired">คนที่เป็นสมาชิกที่หมดอายุไปแล้ว</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-600 mb-1">ข้อความข่าวสาร (รองรับ Markdown)</label>
+                                    <textarea 
+                                        value={broadcastMsg} 
+                                        onChange={(e) => setBroadcastMsg(e.target.value)} 
+                                        rows="5" 
+                                        placeholder="ตัวอย่าง: *แจ้งด่วน* คืนนี้จะมีไลฟ์สรุปประเด็นใหม่ เวลา 20.00 น. ห้ามพลาด!"
+                                        className="w-full border border-neutral-200 p-2.5 rounded text-sm focus:outline-none focus:border-black"
+                                    />
+                                </div>
+
+                                <button 
+                                    onClick={handleSendBroadcast} 
+                                    disabled={isBroadcasting}
+                                    className="w-full bg-black text-white font-bold py-2.5 rounded-lg text-sm active:scale-95 transition-all disabled:bg-neutral-400"
+                                >
+                                    {isBroadcasting ? "ระบบกำลังประมวลผลจัดส่ง..." : "🚀 สั่งบรอดแคสต์ข้อความทันที"}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* 5. สถิติแดชบอร์ด */}
+                        {activeTab === 'dashboard' && (
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-bold text-neutral-800">สถิติระบบ VIP</h3>
+                                
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-white p-4 border border-neutral-200 rounded-xl text-center">
+                                        <span className="text-[10px] uppercase font-bold text-neutral-400">ฐานข้อมูลผู้ใช้งานทั้งหมด</span>
+                                        <div className="text-2xl font-black text-neutral-900 mt-1">{allUsersCount} ราย</div>
+                                    </div>
+                                    <div className="bg-white p-4 border border-neutral-200 rounded-xl text-center">
+                                        <span className="text-[10px] uppercase font-bold text-neutral-400">สมาชิก VIP ทำงานอยู่</span>
+                                        <div className="text-2xl font-black text-neutral-900 mt-1">
+                                            {members.filter(m => m.status === 'active').length} ราย
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-5 border border-neutral-200 rounded-xl space-y-4">
+                                    <h4 className="text-xs font-bold uppercase text-neutral-400">ยอดคนเข้าใช้งาน Bot รายวัน</h4>
+                                    <div>
+                                        <input 
+                                            type="date" 
+                                            value={selectedDate} 
+                                            onChange={(e) => setSelectedDate(e.target.value)} 
+                                            className="w-full border border-neutral-200 p-2 rounded text-sm"
+                                        />
+                                    </div>
+                                    <div className="bg-neutral-50 p-4 rounded-lg text-center">
+                                        <span className="text-xs text-neutral-500">จำนวนการเข้าใช้งานบอทในวันนี้:</span>
+                                        <div className="text-3xl font-black text-black mt-1">{statsCount} ครั้ง</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+                </div>
+            );
+        }
+
+        // โหลด React Application
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+    
+    <!-- สั่งให้รัน Lucide Icons หลังจาก Render เสร็จสิ้น -->
+    <script>
+        setTimeout(() => {
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }, 1500);
+    </script>
+</body>
+</html>
