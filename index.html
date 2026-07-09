@@ -1,151 +1,586 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VIP Subscription - สมัครสมาชิก</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="config.js"></script>
-</head>
-<body class="bg-slate-50 text-slate-800 antialiased">
-    <div id="root"></div>
+<!-- SDK & Core Library สำหรับสถาปัตยกรรมแบบ Single-File -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+<!-- Firebase SDK Compat (ป้องกันการใช้ import ป้องกันปัญหา Browser Block) -->
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
-        function App() {
-            const [loading, setLoading] = useState(true);
-            const [tgUser, setTgUser] = useState(null);
-            const [packages, setPackages] = useState([]);
-            const [settings, setSettings] = useState({});
-            
-            // ส่วนของฟอร์ม
-            const [step, setStep] = useState(1);
-            const [selectedPkg, setSelectedPkg] = useState(null);
-            const [transferTime, setTransferTime] = useState("");
-            const [file, setFile] = useState(null);
-            const [statusMsg, setStatusMsg] = useState("");
+<style>
+    body { 
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+        background-color: #f5f5f5;
+    }
+    /* Custom Scrollbar for Premium Feel */
+    ::-webkit-scrollbar {
+        width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 99px;
+    }
+</style>
+<!-- จุดที่ React จะนำหน้าต่าง UI ไปเรนเดอร์ -->
+<div id="root"></div>
 
-            useEffect(() => {
-                const user = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 12345, first_name: "ผู้ใช้จำลอง" };
-                setTgUser(user);
+<script type="text/babel">
+    const { useState, useEffect } = React;
 
-                // ตรวจสอบสิทธิ์ (ถ้าสิทธิ์ตรง ให้เด้งไปหน้าของบทบาทนั้นๆ)
-                if (user.id.toString() === ADMIN_TG_ID) {
-                    window.location.href = "admin.html"; // ย้ายไปหน้าแอดมิน
-                    return;
-                }
+    // ==========================================
+    // ⚙️ SYSTEM CONFIGURATION (ข้อมูลดั้งเดิมของคุณ)
+    // ==========================================
+    const ADMIN_TG_ID = "7234688831"; 
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwpgFr425h5sFIfRcXdnZl_lp1__ir7zTUkR53-Zj8bNtYQ_hO_7qlU6aeIGyYlGsX/exec";
+    
+    const firebaseConfig = {
+        apiKey: "AIzaSyAxHBeocnF00uoHiMUqMyY2ZgAx9ALVFQI",
+        authDomain: "hacktood-member.firebaseapp.com",
+        projectId: "hacktood-member",
+        storageBucket: "hacktood-member.firebasestorage.app",
+        messagingSenderId: "67545978384",
+        appId: "1:67545978384:web:5e13a0549263fadb7d5c95",
+        measurementId: "G-Q430JLX5J7"
+    };
 
-                db.collection("users").doc(user.id.toString()).onSnapshot(doc => {
-                    if (doc.exists && doc.data().status === "active") {
-                        const expiry = doc.data().expiryDate?.toDate();
-                        if (expiry && expiry > new Date()) {
-                            window.location.href = "member.html"; // ย้ายไปหน้าสมาชิก VIP
-                            return;
-                        }
-                    }
-                    // ถ้าไม่ใช่ทั้งคู่ แสดงว่าเป็น Guest ให้โหลดหน้าสมัครต่อ
-                    setLoading(false);
-                });
+    // เริ่มต้นการเชื่อมต่อฐานข้อมูล
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
 
-                // โหลดแพ็กเกจ
-                db.collection("system").doc("settings").onSnapshot(doc => {
-                    if (doc.exists) {
-                        setSettings(doc.data().textSettings || {});
-                        setPackages(doc.data().packages || []);
-                    }
-                });
-            }, []);
+    // สั่งเปิดขยายหน้าจอ Telegram WebApp
+    if (window.Telegram && window.Telegram.WebApp) {
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+    }
 
-            const handleUploadAndSubmit = async (e) => {
-                e.preventDefault();
-                if (!file || !transferTime) return alert("กรุณากรอกข้อมูลให้ครบถ้วน");
-                setLoading(true);
-                setStatusMsg("กำลังอัปโหลดสลิป...");
 
+    // ==========================================
+    // 📦 MODULE 1: COMPONENT FOR GUEST (หน้าจอผู้ใช้ธรรมดา / สมัครสมาชิก)
+    // ==========================================
+    function GuestFlow({ tgUser, packages, settings }) {
+        const [step, setStep] = useState(1); // 1: เลือกแพ็กเกจ, 2: โอนเงิน/แนบสลิป, 3: สำเร็จ
+        const [selectedPkg, setSelectedPkg] = useState(null);
+        const [transferTime, setTransferTime] = useState("");
+        const [file, setFile] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [statusMsg, setStatusMsg] = useState("");
+
+        const handleSelectPackage = (pkg) => {
+            setSelectedPkg(pkg);
+            setStep(2);
+        };
+
+        const handleUploadAndSubmit = async (e) => {
+            e.preventDefault();
+            if (!file || !transferTime) {
+                alert("กรุณากรอกเวลาโอนและแนบสลิปให้ครบถ้วน");
+                return;
+            }
+
+            setLoading(true);
+            setStatusMsg("กำลังจัดเก็บหลักฐานบนระบบคลาวด์...");
+
+            try {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onloadend = async () => {
                     const base64Data = reader.result.split(',')[1];
+                    
+                    // ส่งรูปขึ้นไดรฟ์ส่วนกลางผ่าน GAS
                     const response = await fetch(GAS_WEB_APP_URL, {
                         method: "POST",
-                        body: JSON.stringify({ action: "upload_slip", filename: `slip_${tgUser.id}.png`, filedata: base64Data })
+                        body: JSON.stringify({
+                            action: "upload_slip",
+                            filename: `slip_${tgUser.id}_${Date.now()}.png`,
+                            filedata: base64Data
+                        })
                     });
+                    
                     const result = await response.json();
                     
                     if (result.status === "success") {
+                        setStatusMsg("กำลังส่งคิวตรวจให้แอดมิน...");
+                        
+                        // ส่งข้อมูลบันทึกเข้า Firestore
                         await db.collection("transactions").add({
                             userId: tgUser.id.toString(),
-                            userName: tgUser.first_name,
+                            userName: tgUser.first_name || "Guest User",
                             package: selectedPkg,
                             transferTime: transferTime,
                             slipUrl: result.url,
                             status: "pending",
                             timestamp: firebase.firestore.FieldValue.serverTimestamp()
                         });
+
                         setStep(3);
                     } else {
-                        alert("เกิดข้อผิดพลาดในการส่งสลิป");
+                        throw new Error("ล้มเหลวในการบันทึกรูปสลิป");
                     }
-                    setLoading(false);
                 };
-            };
+            } catch (error) {
+                alert("เกิดข้อผิดพลาด: " + error.message);
+            } finally {
+                setLoading(false);
+            }
+        };
 
-            if (loading) return <div class="p-8 text-center text-xs text-slate-400">กำลังตรวจสอบสิทธิ์ทางเข้า...</div>;
-
-            return (
-                <div class="p-4 max-w-md mx-auto">
-                    {step === 1 && (
-                        <div>
-                            <div class="text-center my-6">
-                                <h1 class="text-2xl font-black text-blue-600">💎 VIP MEMBER GROUP</h1>
-                                <p class="text-xs text-slate-500 mt-1">{settings.pageA || "เลือกแพ็กเกจที่ต้องการ"}</p>
+        return (
+            <div class="p-6 max-w-md mx-auto min-h-screen flex flex-col justify-between">
+                {step === 1 && (
+                    <div class="animate-fadeIn">
+                        {/* Minimalist Logo / Icon Area */}
+                        <div class="text-center my-10 space-y-3">
+                            <div class="inline-flex items-center justify-center w-14 h-14 bg-black text-white rounded-full text-xl font-bold tracking-widest border border-neutral-800 shadow-lg shadow-black/10">
+                                VIP
                             </div>
-                            <div class="space-y-3">
-                                {packages.map(pkg => (
-                                    <div key={pkg.id} onClick={() => { setSelectedPkg(pkg); setStep(2); }} class="bg-white border p-4 rounded-2xl flex justify-between items-center cursor-pointer shadow-sm hover:border-blue-500">
-                                        <div>
-                                            <div class="font-bold">{pkg.name}</div>
-                                            <div class="text-xs text-slate-400">{pkg.days} วัน</div>
-                                        </div>
-                                        <div class="font-black text-blue-600">{pkg.price} ฿</div>
+                            <h1 class="text-2xl font-black tracking-tight text-neutral-900 uppercase">Premium Access</h1>
+                            <p class="text-xs text-neutral-500 font-medium max-w-[280px] mx-auto leading-relaxed">
+                                {settings.pageA || "เลือกแผนสมาชิกที่เหมาะสมที่สุดเพื่อเข้าถึงสิทธิ์การใช้งานระดับพรีเมียมในกลุ่ม VIP ของเรา"}
+                            </p>
+                        </div>
+
+                        {/* Package Cards Section */}
+                        <div class="space-y-3 mt-4">
+                            {packages.map(pkg => (
+                                <button 
+                                    key={pkg.id} 
+                                    onClick={() => handleSelectPackage(pkg)} 
+                                    class="w-full bg-white border border-neutral-200/80 p-5 rounded-2xl flex justify-between items-center text-left shadow-sm hover:border-black active:scale-[0.98] transition-all group duration-300"
+                                >
+                                    <div class="space-y-1">
+                                        <div class="font-bold text-neutral-900 group-hover:text-black">{pkg.name}</div>
+                                        <div class="text-[11px] text-neutral-400 font-medium">{pkg.days} วันใช้งาน VIP</div>
                                     </div>
-                                ))}
+                                    <div class="text-right">
+                                        <div class="font-black text-xl text-neutral-900">฿{pkg.price}</div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {step === 2 && (
+                    <div class="animate-fadeIn bg-white border border-neutral-200/60 p-6 rounded-3xl shadow-xl shadow-black/[0.02] my-auto space-y-6">
+                        <div class="text-center space-y-1">
+                            <h2 class="text-lg font-bold text-neutral-900">ยืนยันและชำระเงิน</h2>
+                            <p class="text-xs text-neutral-400">กรุณาทำรายการตามบัญชีที่ปรากฏด้านล่าง</p>
+                        </div>
+
+                        {/* Payment details box */}
+                        <div class="bg-neutral-50 border border-neutral-200/40 p-4 rounded-2xl text-xs text-neutral-600 space-y-2 whitespace-pre-line leading-relaxed font-medium">
+                            {settings.pageB || "โอนผ่านบัญชีธนาคารกสิกรไทย\nเลขบัญชี: 123-4-56789-0\nชื่อบัญชี: บจก. พรีเมียม เซอร์วิส"}
+                            <div class="border-t border-neutral-200/60 pt-3 mt-3 flex justify-between items-center">
+                                <span class="text-[10px] text-neutral-400 uppercase tracking-wider font-bold">ยอดเงินที่ต้องโอน</span>
+                                <span class="text-base font-black text-black">฿{selectedPkg.price}</span>
                             </div>
                         </div>
-                    )}
+                        
+                        <form onSubmit={handleUploadAndSubmit} class="space-y-4">
+                            <div class="space-y-1.5">
+                                <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">เวลาที่โอนเงินในสลิป</label>
+                                <input 
+                                    type="text" 
+                                    placeholder="ตัวอย่างเช่น 14:35 น." 
+                                    value={transferTime} 
+                                    onChange={e => setTransferTime(e.target.value)} 
+                                    class="w-full border border-neutral-200 rounded-xl p-3 text-sm focus:outline-none focus:border-black transition-all bg-neutral-50/50" 
+                                    required 
+                                />
+                            </div>
 
-                    {step === 2 && (
-                        <div class="bg-white p-5 rounded-2xl shadow-sm border">
-                            <h2 class="text-lg font-bold text-center mb-4">💰 แจ้งโอนเงิน</h2>
-                            <p class="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-xl">{settings.pageB}</p>
-                            <form onSubmit={handleUploadAndSubmit} class="space-y-4">
-                                <input type="text" placeholder="เวลาที่โอน เช่น 14:35 น." value={transferTime} onChange={e => setTransferTime(e.target.value)} class="w-full border rounded-xl p-2.5 text-sm" required />
-                                <input type="file" accept="image/*" onChange={e => setFile(e.target.files[0])} class="w-full text-xs" required />
-                                <button type="submit" class="w-full bg-blue-600 text-white rounded-xl p-3 font-bold text-sm">{statusMsg || "🚀 ส่งหลักฐาน"}</button>
-                            </form>
-                            <button onClick={() => setStep(1)} class="w-full text-center text-xs text-slate-400 mt-4 underline">ย้อนกลับ</button>
+                            <div class="space-y-1.5">
+                                <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">อัปโหลดสลิปธนาคาร</label>
+                                <div class="relative border-2 border-dashed border-neutral-200 rounded-2xl p-4 text-center hover:bg-neutral-50 transition-colors cursor-pointer bg-neutral-50/20">
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        onChange={e => setFile(e.target.files[0])} 
+                                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                                        required 
+                                    />
+                                    <div class="space-y-1">
+                                        <p class="text-xs font-bold text-neutral-700">
+                                            {file ? "✓ แนบภาพหลักฐานแล้ว" : "เลือกภาพสลิปการโอน"}
+                                        </p>
+                                        <p class="text-[10px] text-neutral-400">
+                                            {file ? file.name : "รองรับไฟล์ภาพนามสกุล .png, .jpg, .jpeg"}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button 
+                                type="submit" 
+                                disabled={loading} 
+                                class="w-full bg-neutral-900 text-white rounded-2xl p-3.5 font-bold text-xs uppercase tracking-wider hover:bg-black disabled:bg-neutral-300 shadow-md shadow-black/10 transition-all active:scale-[0.98] mt-2"
+                            >
+                                {loading ? statusMsg : "ยืนยันการแจ้งชำระเงิน"}
+                            </button>
+                        </form>
+
+                        <button 
+                            onClick={() => setStep(1)} 
+                            class="w-full text-center text-xs font-bold text-neutral-400 hover:text-neutral-600 transition-colors uppercase tracking-wider"
+                        >
+                            ย้อนกลับ
+                        </button>
+                    </div>
+                )}
+
+                {step === 3 && (
+                    <div class="animate-fadeIn text-center py-16 px-6 bg-white rounded-3xl border border-neutral-200/40 shadow-xl my-auto space-y-6">
+                        <div class="inline-flex items-center justify-center w-14 h-14 bg-neutral-100 text-neutral-900 rounded-full text-xl shadow-inner shadow-black/5">
+                            ✓
+                        </div>
+                        <div class="space-y-2">
+                            <h2 class="text-xl font-bold text-neutral-900">บันทึกข้อมูลสำเร็จ!</h2>
+                            <p class="text-xs text-neutral-400 max-w-[240px] mx-auto leading-relaxed">
+                                เจ้าหน้าที่กำลังตรวจสอบหลักฐาน ระบบจะทำการส่งลิงก์เชิญเข้ากลุ่ม VIP ให้คุณโดยอัตโนมัติผ่านช่องทางแชทบอทในไม่ช้า
+                            </p>
+                        </div>
+                    </div>
+                )}
+                
+                <div class="text-center py-4 text-[10px] text-neutral-400 font-medium">
+                    VIP Premium System • Powered by Telegram Mini App
+                </div>
+            </div>
+        );
+    }
+
+
+    // ==========================================
+    // 💳 MODULE 2: COMPONENT FOR MEMBERS (หน้าบัตร VIP สมาชิกที่ชำระเงินแล้ว)
+    // ==========================================
+    function MemberView({ tgUser, userData }) {
+        const formatDate = (timestamp) => {
+            if (!timestamp) return "-";
+            const date = timestamp.toDate();
+            return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+        };
+
+        return (
+            <div class="p-6 max-w-md mx-auto min-h-screen flex flex-col justify-between">
+                <div></div>
+                <div class="animate-fadeIn space-y-6">
+                    {/* Luxury Monochrome Membership Card */}
+                    <div class="bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white p-6 rounded-3xl shadow-2xl relative overflow-hidden border border-neutral-800 shadow-black/40">
+                        {/* Abstract metallic ambient circles */}
+                        <div class="absolute -right-6 -bottom-6 w-32 h-32 bg-white/5 rounded-full blur-xl"></div>
+                        <div class="absolute -left-6 -top-6 w-32 h-32 bg-white/5 rounded-full blur-xl"></div>
+                        
+                        <div class="flex justify-between items-start">
+                            <div class="space-y-1.5">
+                                <span class="bg-white/10 text-white border border-white/15 text-[9px] uppercase font-bold tracking-widest px-2.5 py-1 rounded-full">
+                                    VIP MEMBER PASS
+                                </span>
+                                <h2 class="text-xl font-black mt-2 tracking-tight">{tgUser.first_name}</h2>
+                                <p class="text-[9px] text-neutral-500 font-bold tracking-wider">ID: {tgUser.id}</p>
+                            </div>
+                            <div class="text-xl font-bold tracking-widest opacity-80">VIP</div>
+                        </div>
+                        
+                        <div class="mt-14 pt-4 border-t border-white/10 flex justify-between items-end">
+                            <div>
+                                <p class="text-[9px] text-neutral-500 uppercase tracking-widest font-bold">วันหมดอายุสมาชิก</p>
+                                <p class="text-xs font-bold text-neutral-100">{formatDate(userData.expiryDate)}</p>
+                            </div>
+                            <div class="bg-white/10 px-3 py-1 rounded-xl border border-white/10">
+                                <p class="text-[10px] text-neutral-100 font-black tracking-wide">● ACTIVE</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-center space-y-1">
+                        <h3 class="font-bold text-neutral-800">เข้าถึงสิทธิ์ VIP เรียบร้อยแล้ว</h3>
+                        <p class="text-[11px] text-neutral-400 max-w-[260px] mx-auto leading-relaxed">
+                            ยินดีต้อนรับเข้าสู่กลุ่มสมาชิกพิเศษ คุณสามารถใช้งานข้อมูลเนื้อหาพรีเมียมได้อย่างไร้ขีดจำกัด
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="text-center py-4 text-[10px] text-neutral-400 font-medium">
+                    VIP Premium System • Powered by Telegram Mini App
+                </div>
+            </div>
+        );
+    }
+
+
+    // ==========================================
+    // 👑 MODULE 3: COMPONENT FOR ADMINS (แผงควบคุมแอดมินสำหรับจัดการสลิป)
+    // ==========================================
+    function AdminDashboard({ settings }) {
+        const [tab, setTab] = useState("pending");
+        const [txs, setTxs] = useState([]);
+        const [vipUsers, setVipUsers] = useState([]);
+        const [loadingId, setLoadingId] = useState(null);
+
+        useEffect(() => {
+            // โหลดสลิปค้างอนุมัติเรียลไทม์
+            const unsubTxs = db.collection("transactions").orderBy("timestamp", "desc").onSnapshot(snapshot => {
+                setTxs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            });
+            // โหลดรายชื่อผู้ใช้ VIP เรียลไทม์
+            const unsubUsers = db.collection("users").onSnapshot(snapshot => {
+                setVipUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            });
+            return () => { unsubTxs(); unsubUsers(); };
+        }, []);
+
+        const handleApprove = async (tx) => {
+            if (!confirm(`ต้องการอนุมัติรายการชำระเงินของ ${tx.userName} หรือไม่?`)) return;
+            setLoadingId(tx.id);
+
+            try {
+                // เรียกใช้งาน GAS สร้างลิงก์ Single-use ทักเข้าบอทฝั่งลูกค้า
+                const response = await fetch(GAS_WEB_APP_URL, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        action: "approve",
+                        tgUserId: tx.userId.toString(),
+                        packageName: tx.package.name
+                    })
+                });
+                const resJson = await response.json();
+
+                if(resJson.status === "success") {
+                    // คำนวณวันหมดอายุบันทึกลง Firestore
+                    const daysToAdd = parseInt(tx.package.days) || 30;
+                    const finalExpiry = new Date();
+                    finalExpiry.setDate(finalExpiry.getDate() + daysToAdd);
+
+                    await db.collection("users").doc(tx.userId.toString()).set({
+                        userId: tx.userId.toString(),
+                        name: tx.userName,
+                        status: "active",
+                        package: tx.package,
+                        expiryDate: firebase.firestore.Timestamp.fromDate(finalExpiry)
+                    });
+
+                    await db.collection("transactions").doc(tx.id).update({ status: "approved" });
+                    alert("อนุมัติเสร็จสิ้น ระบบทำการจัดส่งข้อความเรียบร้อย!");
+                } else {
+                    alert("ระบบหลังบ้านขัดข้อง: " + resJson.message);
+                }
+            } catch (err) {
+                alert("ล้มเหลว: " + err.message);
+            } finally {
+                setLoadingId(null);
+            }
+        };
+
+        const handleReject = async (tx) => {
+            if (!confirm(`ต้องการปฏิเสธรายการของ ${tx.userName} หรือไม่?`)) return;
+            setLoadingId(tx.id);
+            try {
+                await fetch(GAS_WEB_APP_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "reject", tgUserId: tx.userId.toString() })
+                });
+                await db.collection("transactions").doc(tx.id).update({ status: "rejected" });
+                alert("ปฏิเสธเรียบร้อย บอทจัดส่งแจ้งเตือนทางแชทแล้ว");
+            } catch (err) {
+                alert("ล้มเหลว: " + err.message);
+            } finally {
+                setLoadingId(null);
+            }
+        };
+
+        return (
+            <div class="p-6 max-w-lg mx-auto min-h-screen flex flex-col justify-between">
+                <div class="space-y-6">
+                    <div class="bg-black text-white p-4 rounded-2xl text-center shadow-md">
+                        <h1 class="text-xs font-black tracking-widest uppercase">🛡️ Admin Control Panel</h1>
+                    </div>
+
+                    {/* Switch Tab Menu */}
+                    <div class="flex space-x-1.5 bg-neutral-200/60 p-1 rounded-2xl text-[11px] font-bold">
+                        <button 
+                            onClick={() => setTab("pending")} 
+                            class={`flex-1 p-2.5 rounded-xl transition-all duration-300 ${tab === 'pending' ? 'bg-white text-neutral-900 shadow-sm shadow-black/5' : 'text-neutral-500'}`}
+                        >
+                            คำร้องรอตรวจ ({txs.filter(t=>t.status==='pending').length})
+                        </button>
+                        <button 
+                            onClick={() => setTab("users")} 
+                            class={`flex-1 p-2.5 rounded-xl transition-all duration-300 ${tab === 'users' ? 'bg-white text-neutral-900 shadow-sm shadow-black/5' : 'text-neutral-500'}`}
+                        >
+                            สมาชิก VIP Active ({vipUsers.length})
+                        </button>
+                    </div>
+
+                    {tab === "pending" && (
+                        <div class="space-y-3">
+                            {txs.filter(t => t.status === "pending").length === 0 ? (
+                                <p class="text-center text-xs text-neutral-400 py-10 font-medium">ไม่มีรายการแจ้งโอนเข้ามาใหม่</p>
+                            ) : (
+                                txs.filter(t => t.status === "pending").map(tx => (
+                                    <div key={tx.id} class="bg-white border border-neutral-200/60 p-5 rounded-2xl shadow-sm space-y-4 animate-fadeIn">
+                                        <div class="flex justify-between items-start border-b border-neutral-100 pb-3 text-xs font-medium">
+                                            <div class="space-y-0.5">
+                                                <p class="font-bold text-neutral-900">{tx.userName}</p>
+                                                <p class="text-[10px] text-neutral-400">แผน: {tx.package?.name}</p>
+                                            </div>
+                                            <div class="text-right">
+                                                <p class="font-black text-neutral-900">฿{tx.package?.price}</p>
+                                                <p class="text-[10px] text-neutral-400">โอน: {tx.transferTime}</p>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="text-center py-1 bg-neutral-50 rounded-xl border border-neutral-100">
+                                            <a href={tx.slipUrl} target="_blank" rel="noreferrer" class="text-[11px] font-bold text-neutral-600 hover:text-black">
+                                                👁️ คลิกตรวจสอบภาพสลิปบนไดรฟ์
+                                            </a>
+                                        </div>
+
+                                        <div class="flex space-x-2 pt-1.5">
+                                            <button 
+                                                onClick={() => handleApprove(tx)} 
+                                                disabled={loadingId !== null} 
+                                                class="flex-1 bg-black text-white rounded-xl p-2.5 font-bold text-xs hover:bg-neutral-900 disabled:bg-neutral-300 transition-colors"
+                                            >
+                                                {loadingId === tx.id ? "..." : "อนุมัติ"}
+                                            </button>
+                                            <button 
+                                                onClick={() => handleReject(tx)} 
+                                                disabled={loadingId !== null} 
+                                                class="flex-1 border border-neutral-200 text-neutral-600 rounded-xl p-2.5 font-bold text-xs hover:bg-neutral-50 disabled:bg-neutral-300 transition-colors"
+                                            >
+                                                ปฏิเสธ
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     )}
 
-                    {step === 3 && (
-                        <div class="text-center py-12 bg-white rounded-2xl border p-6">
-                            <h2 class="text-xl font-bold text-emerald-600">ส่งข้อมูลเรียบร้อย!</h2>
-                            <p class="text-xs text-slate-500 mt-2">กรุณารอแอดมินตรวจสอบ บอทจะส่งลิงก์เข้ากลุ่มให้ทางแชทครับ</p>
+                    {tab === "users" && (
+                        <div class="bg-white border border-neutral-200/60 rounded-2xl divide-y divide-neutral-100 overflow-hidden shadow-sm">
+                            {vipUsers.length === 0 ? (
+                                <p class="text-center text-xs text-neutral-400 py-10 font-medium">ยังไม่มีสมาชิกพรีเมียมในคลังข้อมูล</p>
+                            ) : (
+                                vipUsers.map(user => (
+                                    <div key={user.id} class="p-4 flex justify-between items-center text-xs font-medium animate-fadeIn">
+                                        <div class="space-y-0.5">
+                                            <p class="font-bold text-neutral-900">{user.name}</p>
+                                            <p class="text-[10px] text-neutral-400">Telegram ID: {user.userId}</p>
+                                        </div>
+                                        <span class="bg-neutral-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider">
+                                            ACTIVE
+                                        </span>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     )}
+                </div>
+                
+                <div class="text-center py-4 text-[10px] text-neutral-400 font-medium">
+                    VIP Premium System • Powered by Telegram Mini App
+                </div>
+            </div>
+        );
+    }
+
+
+    // ==========================================
+    // 🔄 ROOT APPLICATION ROUTER (ตัวสับเปลี่ยนสิทธิ์ตามบทบาทผู้ใช้)
+    // ==========================================
+    function App() {
+        const [role, setRole] = useState("loading"); // loading, guest, member, admin
+        const [tgUser, setTgUser] = useState(null);
+        const [userData, setUserData] = useState(null);
+        const [packages, setPackages] = useState([]);
+        const [settings, setSettings] = useState({});
+
+        useEffect(() => {
+            // ดึงตัวตนผู้ใช้งานจาก Telegram WebApp SDK
+            const user = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 12345, first_name: "Test User" };
+            setTgUser(user);
+
+            // บันทึกสถิติผู้ใช้งานลงในทะเบียนหลักของ Firebase เพื่อให้แอดมินใช้ส่ง Broadcast
+            db.collection("all_users").doc(user.id.toString()).set({
+                id: user.id.toString(),
+                name: user.first_name || "Unknown",
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            // ตรวจสอบคัดแยกบทบาทสิทธิ์ (Role Router)
+            if (user.id.toString() === ADMIN_TG_ID) {
+                setRole("admin");
+            } else {
+                db.collection("users").doc(user.id.toString()).onSnapshot(doc => {
+                    if (doc.exists && doc.data().status === "active") {
+                        const expiry = doc.data().expiryDate?.toDate();
+                        if (expiry && expiry > new Date()) {
+                            setUserData(doc.data());
+                            setRole("member");
+                        } else {
+                            setRole("guest"); // อายุสมาชิกสิ้นสุด ย้ายกลับไปหน้าเลือกแพ็กเกจ
+                        }
+                    } else {
+                        setRole("guest"); // ผู้ใช้งานรายใหม่
+                    }
+                });
+            }
+
+            // ดึงการตั้งค่าเนื้อหาและแพ็กเกจราคาทั้งหมด (แสดง 3 แพ็กเกจ ขาว-เทา-ดำ)
+            db.collection("system").doc("settings").onSnapshot(doc => {
+                if (doc.exists) {
+                    setSettings(doc.data().textSettings || {});
+                    setPackages(doc.data().packages || [
+                        { id: "p1", name: "สมาชิก 1 เดือน", days: "30", price: "300" },
+                        { id: "p2", name: "สมาชิก 3 เดือน", days: "90", price: "500" },
+                        { id: "p3", name: "สมาชิก 6 เดือน", days: "180", price: "700" }
+                    ]);
+                } else {
+                    // บันทึกชุดข้อมูลเริ่มต้นหากยังไม่พบข้อมูลในตาราง Firestore
+                    const defaultSettings = {
+                        packages: [
+                            { id: "p1", name: "สมาชิก 1 เดือน", days: "30", price: "300" },
+                            { id: "p2", name: "สมาชิก 3 เดือน", days: "90", price: "500" },
+                            { id: "p3", name: "สมาชิก 6 เดือน", days: "180", price: "700" }
+                        ],
+                        textSettings: {
+                            pageA: "เลือกแผนสมาชิกสมาชิก VIP Group ที่คุณสะดวกและทำรายการด้านล่างได้ทันที",
+                            pageB: "โอนผ่านธนาคารกสิกรไทย\nเลขบัญชี: 123-4-56789-0\nชื่อบัญชี: บจก. พรีเมียม ออฟฟิเชียล\n(กรุณาโอนเงินตรงตามยอดและส่งสลิปเพื่ออนุมัติสิทธิ์อัตโนมัติ)"
+                        }
+                    };
+                    db.collection("system").doc("settings").set(defaultSettings);
+                }
+            });
+
+        }, []);
+
+        if (role === "loading") {
+            return (
+                <div class="flex flex-col justify-center items-center min-h-screen text-neutral-400 text-xs font-bold space-y-3">
+                    <div class="animate-spin rounded-full h-5 w-5 border-2 border-neutral-300 border-t-black"></div>
+                    <p class="uppercase tracking-widest text-[9px]">Securing Premium Connection...</p>
                 </div>
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+        return (
+            <div class="min-h-screen bg-[#f5f5f5] max-w-md mx-auto">
+                {role === "guest" && <GuestFlow tgUser={tgUser} packages={packages} settings={settings} />}
+                {role === "member" && <MemberView tgUser={tgUser} userData={userData} />}
+                {role === "admin" && <AdminDashboard settings={settings} />}
+            </div>
+        );
+    }
+
+    // เชื่อมโยงและสั่งเรนเดอร์ React Component เข้ากับ Element root หลัก
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+</script>
