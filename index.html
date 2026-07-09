@@ -176,7 +176,7 @@
                 setStatusMsg("กำลังส่งข้อมูลแจ้งโอนเงิน...");
 
                 try {
-                    // ส่งข้อมูลบันทึกเข้า Firestore โดยตรง (ตัดขั้นตอนอัปโหลดภาพขึ้น GAS Drive ออก)
+                    // 1. ส่งข้อมูลบันทึกเข้า Firestore โดยตรงเพื่อบันทึกประวัติการสมัครในฐานข้อมูล
                     await db.collection("transactions").add({
                         userId: tgUser.id.toString(),
                         userName: tgUser.first_name || "Guest User",
@@ -187,6 +187,27 @@
                         status: "pending",
                         timestamp: firebase.firestore.FieldValue.serverTimestamp()
                     });
+
+                    // 2. ส่งข้อความแจ้งเตือนหาบอทหลังบ้านเพื่อแจ้งเตือนแอดมินทันทีผ่าน Telegram
+                    setStatusMsg("กำลังแจ้งเตือนระบบไปยังแอดมิน...");
+                    try {
+                        await fetch(GAS_WEB_APP_URL, {
+                            method: "POST",
+                            body: JSON.stringify({
+                                action: "notify_admin",
+                                userName: tgUser.first_name || "Guest User",
+                                userId: tgUser.id.toString(),
+                                packageName: selectedPkg.name,
+                                price: selectedPkg.price,
+                                paymentMethod: paymentMethod,
+                                transferDate: transferDate,
+                                transferTime: transferTime
+                            })
+                        });
+                    } catch (gasErr) {
+                        console.error("Failed to notify admin via GAS:", gasErr);
+                        // ไม่บล็อก Flow ลูกค้า หากการเขียนลงฐานข้อมูลหลัก Firestore สำเร็จแล้ว
+                    }
 
                     setStep(4);
                 } catch (error) {
@@ -508,9 +529,16 @@
                         packageName: tx.package.name
                     })
                 });
-                const resJson = await response.json();
+                
+                const resText = await response.text();
+                let resJson;
+                try {
+                    resJson = JSON.parse(resText);
+                } catch (parseErr) {
+                    throw new Error(`ระบบหลังบ้านส่งค่ากลับมาผิดรูปแบบ (ได้รับค่า: "${resText}"). \n\nโปรดตรวจสอบว่าบอท Telegram ของคุณถูกตั้งสิทธิ์เป็นผู้ดูแลกลุ่ม (Admin) และ Group ID ถูกต้องหรือยังครับ`);
+                }
 
-                if (resJson.success) {
+                if (resJson && resJson.success) {
                     // คำนวณวันหมดอายุบันทึกลง Firestore
                     const daysToAdd = parseInt(tx.package.days) || 30;
                     const finalExpiry = new Date();
@@ -527,10 +555,10 @@
                     await db.collection("transactions").doc(tx.id).update({ status: "approved" });
                     alert("อนุมัติสำเร็จ! ระบบส่งลิงก์เชิญเข้ากลุ่มให้ผู้ใช้เรียบร้อยแล้ว");
                 } else {
-                    alert("ระบบหลังบ้านขัดข้อง: " + (resJson.error || "ไม่สามารถดึงข้อมูลคีย์ลิงก์ได้"));
+                    alert("ระบบหลังบ้านขัดข้อง: " + (resJson?.error || "ไม่สามารถดึงข้อมูลคีย์ลิงก์ได้"));
                 }
             } catch (err) {
-                alert("ล้มเหลว: " + err.message);
+                alert("เกิดข้อผิดพลาดในการอนุมัติ: " + err.message);
             } finally {
                 setLoadingId(null);
             }
@@ -543,7 +571,7 @@
             setLoadingId(tx.id);
             try {
                 // แจ้งเตือนผู้ใช้ผ่านบอทด้วยสคริปต์ GAS
-                await fetch(GAS_WEB_APP_URL, {
+                const response = await fetch(GAS_WEB_APP_URL, {
                     method: "POST",
                     body: JSON.stringify({ 
                         action: "reject", 
@@ -552,11 +580,23 @@
                     })
                 });
                 
-                await db.collection("transactions").doc(tx.id).update({ 
-                    status: "rejected",
-                    rejectReason: reason
-                });
-                alert("ปฏิเสธรายการแล้ว บอทได้ทำการส่งข้อความชี้แจงไปที่ผู้สมัครเรียบร้อย");
+                const resText = await response.text();
+                let resJson;
+                try {
+                    resJson = JSON.parse(resText);
+                } catch (parseErr) {
+                    throw new Error(`ระบบหลังบ้านส่งค่ากลับมาผิดรูปแบบ (ได้รับค่า: "${resText}")`);
+                }
+
+                if (resJson && resJson.success) {
+                    await db.collection("transactions").doc(tx.id).update({ 
+                        status: "rejected",
+                        rejectReason: reason
+                    });
+                    alert("ปฏิเสธรายการแล้ว บอทได้ทำการส่งข้อความชี้แจงไปที่ผู้สมัครเรียบร้อย");
+                } else {
+                    alert("ล้มเหลวในการปฏิเสธ: " + (resJson?.error || "ไม่สามารถส่งแจ้งเตือนผ่านบอทได้"));
+                }
             } catch (err) {
                 alert("ล้มเหลว: " + err.message);
             } finally {
