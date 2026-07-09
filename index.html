@@ -2,519 +2,150 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VIP Subscription System</title>
-    <!-- Telegram Web App SDK -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIP Subscription - สมัครสมาชิก</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Tailwind CSS สำหรับดีไซน์โทน ขาว-เทา-ดำ -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: { black: '#111', gray: { 100: '#f4f4f5', 800: '#27272a' } }
-                }
-            }
-        }
-    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="config.js"></script>
 </head>
-<body class="bg-gray-100 text-black font-sans antialiased min-h-screen">
+<body class="bg-slate-50 text-slate-800 antialiased">
+    <div id="root"></div>
 
-    <!-- Loading Screen -->
-    <div id="loading" class="fixed inset-0 bg-white flex flex-col items-center justify-center z-50">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-black mb-4"></div>
-        <p class="text-gray-600 font-medium">กำลังโหลดระบบ...</p>
-    </div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-    <div class="max-w-md mx-auto p-4 pb-20">
-        <!-- ==================== ส่วนของ USER (Guest) ==================== -->
-        
-        <!-- หน้า A: เลือกแพ็กเกจ -->
-        <div id="page-guest-packages" class="hidden">
-            <h1 class="text-2xl font-bold mb-6 text-center">เลือกแพ็กเกจสมาชิก VIP</h1>
-            <div id="package-list" class="space-y-4">
-                <!-- ข้อมูลแพ็กเกจจะถูก Render ด้วย JS ที่นี่ -->
-            </div>
-        </div>
-
-        <!-- หน้า B/C/D: ช่องทางการชำระเงินและแนบสลิป -->
-        <div id="page-payment" class="hidden">
-            <button onclick="switchPage('page-guest-packages')" class="mb-4 text-sm text-gray-500 font-medium flex items-center">
-                ← กลับไปเลือกแพ็กเกจ
-            </button>
-            <h1 class="text-xl font-bold mb-4">ช่องทางการชำระเงิน</h1>
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-6">
-                <div id="payment-info" class="text-gray-700 space-y-2 text-sm">
-                    <!-- ข้อมูลบัญชีจะถูกดึงจาก Firebase มาแสดงที่นี่ -->
-                </div>
-            </div>
-
-            <h2 class="text-lg font-bold mb-3">แจ้งโอนเงิน</h2>
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">สลิปโอนเงิน (บังคับ)</label>
-                    <input type="file" id="slipImage" accept="image/*" class="w-full text-sm border border-gray-300 rounded-lg p-2">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">เวลาที่โอน (ตามสลิป)</label>
-                    <input type="time" id="transferTime" class="w-full text-sm border border-gray-300 rounded-lg p-2">
-                </div>
-                <button onclick="submitPayment()" class="w-full bg-black text-white font-bold py-3 rounded-xl hover:bg-gray-800 transition shadow-md mt-4">
-                    ยืนยันการแจ้งโอน
-                </button>
-            </div>
-        </div>
-
-        <!-- หน้าแสดงสถานะรอตรวจสอบ -->
-        <div id="page-pending" class="hidden text-center mt-10">
-            <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-                <div class="text-4xl mb-4">⏳</div>
-                <h2 class="text-xl font-bold mb-2">กำลังรอตรวจสอบ</h2>
-                <p class="text-gray-600 text-sm">แอดมินกำลังตรวจสอบรายการชำระเงินของคุณ ระบบจะแจ้งเตือนลิงก์เข้ากลุ่มผ่านแชทบอทเมื่อได้รับการอนุมัติ</p>
-                <button onclick="Telegram.WebApp.close()" class="mt-6 w-full border-2 border-black text-black font-bold py-3 rounded-xl">ปิดหน้าต่าง</button>
-            </div>
-        </div>
-
-        <!-- ==================== ส่วนของ USER (Active Member) ==================== -->
-        <div id="page-member" class="hidden">
-            <div class="bg-black text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
-                <div class="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-2xl"></div>
-                <h2 class="text-lg text-gray-300 mb-1">บัตรสมาชิก VIP</h2>
-                <h1 class="text-2xl font-bold mb-6" id="member-name">Name</h1>
-                
-                <div class="flex justify-between items-end">
-                    <div>
-                        <p class="text-xs text-gray-400">แพ็กเกจ</p>
-                        <p class="font-bold" id="member-package">...</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-xs text-gray-400">วันหมดอายุ</p>
-                        <p class="font-bold" id="member-expire">...</p>
-                    </div>
-                </div>
-            </div>
+        function App() {
+            const [loading, setLoading] = useState(true);
+            const [tgUser, setTgUser] = useState(null);
+            const [packages, setPackages] = useState([]);
+            const [settings, setSettings] = useState({});
             
-            <div class="mt-6 bg-white p-5 rounded-2xl shadow-sm border border-gray-200 text-center">
-                <p class="text-gray-500 text-sm mb-1">สถานะสมาชิกของคุณ</p>
-                <h3 class="text-3xl font-black text-black" id="member-days-left">...</h3>
-                <p class="text-gray-500 text-sm mt-1">วันคงเหลือ</p>
-            </div>
-            
-            <!-- กรณีหมดอายุแล้วจะแสดงปุ่มนี้ -->
-            <button id="btn-renew" onclick="switchPage('page-guest-packages')" class="hidden w-full mt-6 bg-black text-white font-bold py-3 rounded-xl hover:bg-gray-800 transition">
-                ต่ออายุสมาชิก
-            </button>
-        </div>
+            // ส่วนของฟอร์ม
+            const [step, setStep] = useState(1);
+            const [selectedPkg, setSelectedPkg] = useState(null);
+            const [transferTime, setTransferTime] = useState("");
+            const [file, setFile] = useState(null);
+            const [statusMsg, setStatusMsg] = useState("");
 
-        <!-- ==================== ส่วนของ ADMIN ==================== -->
-        <div id="page-admin" class="hidden">
-            <h1 class="text-2xl font-bold mb-4">ระบบจัดการ (Admin)</h1>
-            
-            <!-- Tabs -->
-            <div class="flex space-x-2 mb-6 border-b border-gray-200 pb-2 overflow-x-auto">
-                <button onclick="adminTab('approve')" id="tab-approve" class="px-4 py-2 font-bold text-black border-b-2 border-black whitespace-nowrap">รอยืนยัน</button>
-                <button onclick="adminTab('users')" id="tab-users" class="px-4 py-2 font-medium text-gray-500 whitespace-nowrap">สมาชิกทั้งหมด</button>
-                <button onclick="adminTab('broadcast')" id="tab-broadcast" class="px-4 py-2 font-medium text-gray-500 whitespace-nowrap">บรอดแคสต์</button>
-            </div>
+            useEffect(() => {
+                const user = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 12345, first_name: "ผู้ใช้จำลอง" };
+                setTgUser(user);
 
-            <!-- Tab: รอยืนยัน (Pending Transactions) -->
-            <div id="admin-approve" class="space-y-4">
-                <div id="pending-list" class="text-center text-gray-500 py-10">ไม่มีรายการรอยืนยัน</div>
-            </div>
-
-            <!-- Tab: จัดการสมาชิก -->
-            <div id="admin-users" class="hidden space-y-4">
-                <input type="text" placeholder="ค้นหา ID หรือ ชื่อ..." class="w-full text-sm border border-gray-300 rounded-lg p-3 mb-4">
-                <div id="users-list" class="space-y-3"></div>
-            </div>
-
-            <!-- Tab: Broadcast -->
-            <div id="admin-broadcast" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-                <label class="block text-sm font-medium text-gray-700 mb-2">ส่งข้อความถึง</label>
-                <select id="broadcast-target" class="w-full border border-gray-300 rounded-lg p-2 mb-4">
-                    <option value="all">ทุกคนในระบบ</option>
-                    <option value="guest">ผู้ที่ยังไม่เคยสมัคร (Guest)</option>
-                    <option value="active">สมาชิกที่ยังใช้งานอยู่ (Active)</option>
-                    <option value="expired">สมาชิกที่หมดอายุแล้ว (Expired)</option>
-                </select>
-                <textarea id="broadcast-msg" rows="4" class="w-full border border-gray-300 rounded-lg p-3 mb-4" placeholder="พิมพ์ข้อความที่นี่..."></textarea>
-                <button onclick="sendBroadcast()" class="w-full bg-black text-white font-bold py-3 rounded-xl shadow-md">ส่งข้อความ (Broadcast)</button>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- Firebase SDK (v11) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-
-        // ==========================================
-        // 🔴 ตั้งค่า Firebase Config ของคุณที่นี่
-        // ==========================================
-const firebaseConfig = {
-  apiKey: "AIzaSyAxHBeocnF00uoHiMUqMyY2ZgAx9ALVFQI",
-  authDomain: "hacktood-member.firebaseapp.com",
-  projectId: "hacktood-member",
-  storageBucket: "hacktood-member.firebasestorage.app",
-  messagingSenderId: "67545978384",
-  appId: "1:67545978384:web:5e13a0549263fadb7d5c95",
-  measurementId: "G-Q430JLX5J7"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-
-        // ==========================================
-        // 🔴 ตั้งค่า Google Apps Script Web App URL
-        // ==========================================
-        const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwV-Qq2BxArrUpthkCpB5p7Y9FgOyLhFHlTSdCJoUW-43ks_fncoo7Ege2Yyca_7gIu/exec";
-
-        // ตัวแปร Global
-        const tg = window.Telegram.WebApp;
-        let currentUser = null;
-        let selectedPackage = null;
-        let packagesData = [];
-
-        tg.expand();
-
-        // เริ่มต้นการทำงาน
-        async function initApp() {
-            try {
-                // ดึงข้อมูล User จาก Telegram (หากรันบน Browser ปกติจะใช้ Mock data)
-                const tgUser = tg.initDataUnsafe?.user || { id: "123456", first_name: "TestUser", username: "tester" };
-                const userId = tgUser.id.toString();
-
-                // 1. ดึงการตั้งค่าและแพ็กเกจจาก Firebase
-                const settingsSnap = await getDoc(doc(db, "settings", "global"));
-                if (settingsSnap.exists()) {
-                    const settings = settingsSnap.data();
-                    packagesData = settings.packages || [];
-                    
-                    // Render ข้อมูลบัญชีชำระเงิน
-                    document.getElementById('payment-info').innerHTML = `
-                        <p><strong>ธนาคาร:</strong> ${settings.bank_info || '-'}</p>
-                        <p><strong>TrueMoney:</strong> ${settings.truemoney_info || '-'}</p>
-                        <p><strong>PayPal:</strong> ${settings.paypal_info || '-'}</p>
-                    `;
-                    
-                    // Render แพ็กเกจ
-                    const pkgContainer = document.getElementById('package-list');
-                    pkgContainer.innerHTML = '';
-                    packagesData.forEach(pkg => {
-                        pkgContainer.innerHTML += `
-                            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
-                                <div>
-                                    <h3 class="font-bold text-lg">${pkg.name} (${pkg.days} วัน)</h3>
-                                    <p class="text-sm text-gray-500">${pkg.desc}</p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="font-black text-xl">฿${pkg.price}</p>
-                                    <button onclick="window.selectPkg('${pkg.id}')" class="mt-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-gray-800">เลือก</button>
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
-
-                // 2. ตรวจสอบข้อมูล User ในฐานข้อมูล
-                const userRef = doc(db, "users", userId);
-                const userSnap = await getDoc(userRef);
-
-                if (!userSnap.exists()) {
-                    // สมัครใหม่ (Guest)
-                    await setDoc(userRef, {
-                        telegramId: userId,
-                        name: tgUser.first_name,
-                        username: tgUser.username || "",
-                        role: "guest",
-                        status: "none",
-                        createdAt: serverTimestamp()
-                    });
-                    currentUser = { telegramId: userId, role: "guest", status: "none" };
-                    switchPage('page-guest-packages');
-                } else {
-                    currentUser = userSnap.data();
-                    
-                    if (currentUser.role === 'admin') {
-                        switchPage('page-admin');
-                        loadAdminData();
-                    } else if (currentUser.status === 'pending') {
-                        switchPage('page-pending');
-                    } else if (currentUser.status === 'active' || currentUser.status === 'expired') {
-                        // คำนวณวันหมดอายุ
-                        const expireDate = currentUser.expireDate ? currentUser.expireDate.toDate() : new Date();
-                        const today = new Date();
-                        const timeDiff = expireDate.getTime() - today.getTime();
-                        const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
-                        
-                        document.getElementById('member-name').innerText = currentUser.name;
-                        document.getElementById('member-package').innerText = currentUser.packageName || 'VIP';
-                        document.getElementById('member-expire').innerText = expireDate.toLocaleDateString('th-TH');
-
-                        if (daysLeft > 0) {
-                            document.getElementById('member-days-left').innerText = daysLeft;
-                            // อัปเดตสถานะถ้าวันยังเหลือแต่ db เป็น expired
-                            if (currentUser.status === 'expired') await updateDoc(userRef, { status: 'active' });
-                        } else {
-                            document.getElementById('member-days-left').innerText = "0";
-                            document.getElementById('member-days-left').classList.add("text-red-500");
-                            document.getElementById('btn-renew').classList.remove('hidden');
-                            // อัปเดตสถานะหมดอายุอัตโนมัติเมื่อเปิดแอป
-                            if (currentUser.status === 'active') await updateDoc(userRef, { status: 'expired' });
-                        }
-                        switchPage('page-member');
-                    } else {
-                        switchPage('page-guest-packages');
-                    }
-                }
-                
-                document.getElementById('loading').classList.add('hidden');
-
-            } catch (error) {
-                console.error("Error init:", error);
-                alert("เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล");
-            }
-        }
-
-        // ฟังชันก์ใช้งานทั่วไป
-        window.switchPage = function(pageId) {
-            document.querySelectorAll('body > div.max-w-md > div').forEach(el => el.classList.add('hidden'));
-            document.getElementById(pageId).classList.remove('hidden');
-        }
-
-        window.selectPkg = function(pkgId) {
-            selectedPackage = packagesData.find(p => p.id === pkgId);
-            switchPage('page-payment');
-        }
-
-        // แปลงไฟล์เป็น Base64
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = error => reject(error);
-            });
-        }
-
-        // ผู้ใช้กดส่งสลิป
-        window.submitPayment = async function() {
-            const fileInput = document.getElementById('slipImage');
-            const timeInput = document.getElementById('transferTime').value;
-
-            if (!fileInput.files[0] || !timeInput) {
-                tg.showAlert("กรุณาแนบสลิปและระบุเวลาโอน");
-                return;
-            }
-
-            tg.MainButton.text = "กำลังส่งข้อมูล (ห้ามปิดแอป)...";
-            tg.MainButton.show();
-            tg.MainButton.showProgress();
-
-            try {
-                const file = fileInput.files[0];
-                const base64Data = await fileToBase64(file);
-                const txId = "TX_" + new Date().getTime();
-
-                // 1. ส่งรูปไปให้ GAS บันทึกลง Google Drive
-                const payload = {
-                    action: "uploadSlip",
-                    fileName: `${currentUser.telegramId}_${txId}.jpg`,
-                    mimeType: file.type,
-                    base64: base64Data
-                };
-
-                const response = await fetch(GAS_WEBAPP_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                });
-                const result = await response.json();
-
-                if (!result.success) throw new Error("Upload Drive Failed");
-
-                // 2. บันทึก Transaction ลง Firebase
-                await setDoc(doc(db, "transactions", txId), {
-                    txId: txId,
-                    userId: currentUser.telegramId,
-                    userName: currentUser.name,
-                    packageId: selectedPackage.id,
-                    packageName: selectedPackage.name,
-                    packageDays: selectedPackage.days,
-                    transferTime: timeInput,
-                    slipUrl: result.fileUrl,
-                    status: "pending",
-                    timestamp: serverTimestamp()
-                });
-
-                // 3. เปลี่ยนสถานะ User เป็น Pending
-                await updateDoc(doc(db, "users", currentUser.telegramId), { status: "pending" });
-
-                // 4. สั่งให้ GAS ทักแจ้งเตือนแอดมิน (Webhook ย้อนกลับ)
-                await fetch(GAS_WEBAPP_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: "notifyAdmin", text: `🚨 มีรายการแจ้งชำระเงินใหม่จาก ${currentUser.name}\nกรุณาเข้า Mini App เพื่อตรวจสอบ` })
-                });
-
-                switchPage('page-pending');
-                tg.showAlert("ส่งข้อมูลสำเร็จ! กรุณารอแอดมินอนุมัติ");
-
-            } catch (error) {
-                console.error(error);
-                tg.showAlert("เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองใหม่");
-            } finally {
-                tg.MainButton.hide();
-            }
-        }
-
-        // ==========================================
-        // ส่วนของ ADMIN SCRIPT
-        // ==========================================
-        window.adminTab = function(tabName) {
-            ['approve', 'users', 'broadcast'].forEach(t => {
-                document.getElementById(`admin-${t}`).classList.add('hidden');
-                document.getElementById(`tab-${t}`).classList.remove('text-black', 'border-b-2', 'border-black');
-                document.getElementById(`tab-${t}`).classList.add('text-gray-500');
-            });
-            document.getElementById(`admin-${tabName}`).classList.remove('hidden');
-            document.getElementById(`tab-${tabName}`).classList.add('text-black', 'border-b-2', 'border-black');
-            document.getElementById(`tab-${tabName}`).classList.remove('text-gray-500');
-        }
-
-        async function loadAdminData() {
-            // ฟังการเปลี่ยนแปลงแบบ Realtime ของรายการที่รออนุมัติ
-            const q = query(collection(db, "transactions"), where("status", "==", "pending"));
-            onSnapshot(q, (querySnapshot) => {
-                const listEl = document.getElementById('pending-list');
-                listEl.innerHTML = '';
-                if (querySnapshot.empty) {
-                    listEl.innerHTML = '<div class="text-center text-gray-500 py-10">ไม่มีรายการรอยืนยัน</div>';
+                // ตรวจสอบสิทธิ์ (ถ้าสิทธิ์ตรง ให้เด้งไปหน้าของบทบาทนั้นๆ)
+                if (user.id.toString() === ADMIN_TG_ID) {
+                    window.location.href = "admin.html"; // ย้ายไปหน้าแอดมิน
                     return;
                 }
-                
-                querySnapshot.forEach((docSnap) => {
-                    const tx = docSnap.data();
-                    listEl.innerHTML += `
-                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <div class="flex justify-between mb-2">
-                                <span class="font-bold">${tx.userName}</span>
-                                <span class="text-sm text-gray-500">เวลาโอน: ${tx.transferTime}</span>
-                            </div>
-                            <p class="text-sm text-gray-600 mb-3">แพ็กเกจ: ${tx.packageName} (${tx.packageDays} วัน)</p>
-                            <a href="${tx.slipUrl}" target="_blank" class="block text-center text-sm text-blue-600 bg-blue-50 py-2 rounded-lg mb-3">ดูสลิป (Google Drive)</a>
-                            <div class="flex space-x-2">
-                                <button onclick="approveUser('${tx.txId}', '${tx.userId}', ${tx.packageDays}, '${tx.packageName}')" class="flex-1 bg-black text-white py-2 rounded-lg font-bold text-sm">✅ อนุมัติ</button>
-                                <button onclick="rejectUser('${tx.txId}', '${tx.userId}')" class="flex-1 bg-gray-200 text-black py-2 rounded-lg font-bold text-sm">❌ ปฏิเสธ</button>
-                            </div>
-                        </div>
-                    `;
-                });
-            });
 
-            // โหลดรายชื่อผู้ใช้ทั้งหมด
-            const usersSnap = await getDocs(collection(db, "users"));
-            const usersListEl = document.getElementById('users-list');
-            usersListEl.innerHTML = '';
-            usersSnap.forEach(docSnap => {
-                const u = docSnap.data();
-                const statusColor = u.status === 'active' ? 'text-green-600' : (u.status === 'expired' ? 'text-red-500' : 'text-gray-500');
-                usersListEl.innerHTML += `
-                    <div class="bg-white p-3 rounded-lg border border-gray-200 flex justify-between items-center">
+                db.collection("users").doc(user.id.toString()).onSnapshot(doc => {
+                    if (doc.exists && doc.data().status === "active") {
+                        const expiry = doc.data().expiryDate?.toDate();
+                        if (expiry && expiry > new Date()) {
+                            window.location.href = "member.html"; // ย้ายไปหน้าสมาชิก VIP
+                            return;
+                        }
+                    }
+                    // ถ้าไม่ใช่ทั้งคู่ แสดงว่าเป็น Guest ให้โหลดหน้าสมัครต่อ
+                    setLoading(false);
+                });
+
+                // โหลดแพ็กเกจ
+                db.collection("system").doc("settings").onSnapshot(doc => {
+                    if (doc.exists) {
+                        setSettings(doc.data().textSettings || {});
+                        setPackages(doc.data().packages || []);
+                    }
+                });
+            }, []);
+
+            const handleUploadAndSubmit = async (e) => {
+                e.preventDefault();
+                if (!file || !transferTime) return alert("กรุณากรอกข้อมูลให้ครบถ้วน");
+                setLoading(true);
+                setStatusMsg("กำลังอัปโหลดสลิป...");
+
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = async () => {
+                    const base64Data = reader.result.split(',')[1];
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        body: JSON.stringify({ action: "upload_slip", filename: `slip_${tgUser.id}.png`, filedata: base64Data })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.status === "success") {
+                        await db.collection("transactions").add({
+                            userId: tgUser.id.toString(),
+                            userName: tgUser.first_name,
+                            package: selectedPkg,
+                            transferTime: transferTime,
+                            slipUrl: result.url,
+                            status: "pending",
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        setStep(3);
+                    } else {
+                        alert("เกิดข้อผิดพลาดในการส่งสลิป");
+                    }
+                    setLoading(false);
+                };
+            };
+
+            if (loading) return <div class="p-8 text-center text-xs text-slate-400">กำลังตรวจสอบสิทธิ์ทางเข้า...</div>;
+
+            return (
+                <div class="p-4 max-w-md mx-auto">
+                    {step === 1 && (
                         <div>
-                            <p class="font-bold text-sm">${u.name} (@${u.username})</p>
-                            <p class="text-xs ${statusColor}">Status: ${u.status}</p>
+                            <div class="text-center my-6">
+                                <h1 class="text-2xl font-black text-blue-600">💎 VIP MEMBER GROUP</h1>
+                                <p class="text-xs text-slate-500 mt-1">{settings.pageA || "เลือกแพ็กเกจที่ต้องการ"}</p>
+                            </div>
+                            <div class="space-y-3">
+                                {packages.map(pkg => (
+                                    <div key={pkg.id} onClick={() => { setSelectedPkg(pkg); setStep(2); }} class="bg-white border p-4 rounded-2xl flex justify-between items-center cursor-pointer shadow-sm hover:border-blue-500">
+                                        <div>
+                                            <div class="font-bold">{pkg.name}</div>
+                                            <div class="text-xs text-slate-400">{pkg.days} วัน</div>
+                                        </div>
+                                        <div class="font-black text-blue-600">{pkg.price} ฿</div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <button class="text-xs border border-gray-300 px-2 py-1 rounded">แก้ไข</button>
-                    </div>
-                `;
-            });
+                    )}
+
+                    {step === 2 && (
+                        <div class="bg-white p-5 rounded-2xl shadow-sm border">
+                            <h2 class="text-lg font-bold text-center mb-4">💰 แจ้งโอนเงิน</h2>
+                            <p class="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-xl">{settings.pageB}</p>
+                            <form onSubmit={handleUploadAndSubmit} class="space-y-4">
+                                <input type="text" placeholder="เวลาที่โอน เช่น 14:35 น." value={transferTime} onChange={e => setTransferTime(e.target.value)} class="w-full border rounded-xl p-2.5 text-sm" required />
+                                <input type="file" accept="image/*" onChange={e => setFile(e.target.files[0])} class="w-full text-xs" required />
+                                <button type="submit" class="w-full bg-blue-600 text-white rounded-xl p-3 font-bold text-sm">{statusMsg || "🚀 ส่งหลักฐาน"}</button>
+                            </form>
+                            <button onClick={() => setStep(1)} class="w-full text-center text-xs text-slate-400 mt-4 underline">ย้อนกลับ</button>
+                        </div>
+                    )}
+
+                    {step === 3 && (
+                        <div class="text-center py-12 bg-white rounded-2xl border p-6">
+                            <h2 class="text-xl font-bold text-emerald-600">ส่งข้อมูลเรียบร้อย!</h2>
+                            <p class="text-xs text-slate-500 mt-2">กรุณารอแอดมินตรวจสอบ บอทจะส่งลิงก์เข้ากลุ่มให้ทางแชทครับ</p>
+                        </div>
+                    )}
+                </div>
+            );
         }
 
-        window.approveUser = async function(txId, userId, daysToAdd, pkgName) {
-            if(!confirm("ยืนยันการอนุมัติและส่งลิงก์เข้ากลุ่ม?")) return;
-            tg.MainButton.text = "กำลังดำเนินการ..."; tg.MainButton.show();
-            
-            try {
-                // 1. คำนวณวันหมดอายุใหม่ (นับตั้งแต่วันที่อนุมัติ + วันแพ็กเกจ)
-                const newExpire = new Date();
-                newExpire.setDate(newExpire.getDate() + daysToAdd);
-
-                // 2. อัปเดต User สถานะ
-                await updateDoc(doc(db, "users", userId), {
-                    status: "active",
-                    packageName: pkgName,
-                    expireDate: newExpire
-                });
-
-                // 3. อัปเดต Transaction
-                await updateDoc(doc(db, "transactions", txId), { status: "approved" });
-
-                // 4. สั่ง GAS ให้สร้างลิงก์และส่งหา User (สำคัญมาก!)
-                await fetch(GAS_WEBAPP_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({ 
-                        action: "sendInvite", 
-                        targetUserId: userId,
-                        days: daysToAdd 
-                    })
-                });
-
-                tg.showAlert("อนุมัติและส่งลิงก์เรียบร้อยแล้ว!");
-            } catch (error) {
-                console.error(error);
-                tg.showAlert("เกิดข้อผิดพลาด");
-            } finally {
-                tg.MainButton.hide();
-            }
-        }
-
-        window.rejectUser = async function(txId, userId) {
-            if(!confirm("ปฏิเสธสลิปนี้?")) return;
-            await updateDoc(doc(db, "transactions", txId), { status: "rejected" });
-            await updateDoc(doc(db, "users", userId), { status: "guest" });
-            // แจ้งเตือนผู้ใช้ว่าไม่ผ่าน
-            await fetch(GAS_WEBAPP_URL, {
-                method: 'POST',
-                body: JSON.stringify({ action: "sendMessage", targetUserId: userId, text: "❌ สลิปของคุณไม่ได้รับการอนุมัติ กรุณาติดต่อแอดมิน" })
-            });
-        }
-
-        window.sendBroadcast = async function() {
-            const target = document.getElementById('broadcast-target').value;
-            const msg = document.getElementById('broadcast-msg').value;
-            if(!msg) { tg.showAlert("กรุณาพิมพ์ข้อความ"); return; }
-            
-            tg.MainButton.text = "กำลังส่ง Broadcast..."; tg.MainButton.show();
-            
-            try {
-                // ดึง ID ผู้ใช้ทั้งหมดตามเงื่อนไข
-                let q;
-                if(target === 'all') q = query(collection(db, "users"));
-                else q = query(collection(db, "users"), where("status", "==", target));
-                
-                const snap = await getDocs(q);
-                const ids = [];
-                snap.forEach(d => ids.push(d.id));
-
-                // ส่ง Array IDs ให้ GAS วนลูปส่งข้อความ
-                await fetch(GAS_WEBAPP_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: "broadcast", ids: ids, text: msg })
-                });
-
-                tg.showAlert(`ส่งสำเร็จ ${ids.length} คน`);
-                document.getElementById('broadcast-msg').value = '';
-            } catch(e) {
-                console.error(e); tg.showAlert("เกิดข้อผิดพลาด");
-            } finally {
-                tg.MainButton.hide();
-            }
-        }
-
-        // รันเมื่อโหลดไฟล์เสร็จ
-        window.onload = initApp;
-
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
