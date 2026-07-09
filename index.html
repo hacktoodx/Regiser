@@ -93,12 +93,7 @@
             window.Telegram.WebApp.expand();
         }
 
-        // --- ไอคอน SVG ป้องกันปัญหา Crash ของ React ---
-        const IconCrown = () => (
-            <svg class="w-8 h-8 text-white animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-            </svg>
-        );
+        // --- ไอคอน SVG ---
         const IconArrowLeft = () => (
             <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -109,14 +104,14 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" />
             </svg>
         );
-        const IconUpload = () => (
-            <svg class="w-7 h-7 text-neutral-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-        );
         const IconCheck = () => (
             <svg class="w-12 h-12 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+            </svg>
+        );
+        const IconCopy = () => (
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
             </svg>
         );
 
@@ -124,12 +119,12 @@
         // 📦 MODULE 1: COMPONENT FOR GUEST (หน้าจอผู้ใช้ธรรมดา / สมัครสมาชิก)
         // ==========================================
         function GuestFlow({ tgUser, packages, settings }) {
-            const [step, setStep] = useState(1); // 1: เลือกแพ็กเกจ, 2: เลือกช่องทางชำระเงิน, 3: แนบหลักฐานสลิป, 4: สำเร็จ
+            const [step, setStep] = useState(1); // 1: เลือกแพ็กเกจ, 2: เลือกช่องทางชำระเงิน, 3: กรอกข้อมูลโอนเงิน, 4: สำเร็จ
             const [selectedPkg, setSelectedPkg] = useState(null);
             const [paymentMethod, setPaymentMethod] = useState(""); // bank, wallet, paypal
+            const [transferDate, setTransferDate] = useState(new Date().toISOString().split('T')[0]);
             const [transferTime, setTransferTime] = useState("");
-            const [file, setFile] = useState(null);
-            const [fileNameText, setFileNameText] = useState("เลือกภาพสลิปการโอน");
+            const [copied, setCopied] = useState(false);
             const [loading, setLoading] = useState(false);
             const [statusMsg, setStatusMsg] = useState("");
 
@@ -140,83 +135,68 @@
 
             const handleSelectMethod = (method) => {
                 setPaymentMethod(method);
+                // ดึงเวลาปัจจุบันมาเซ็ตเป็นค่าเริ่มต้นเพื่อความสะดวกของลูกค้า
+                const now = new Date();
+                const currentHours = String(now.getHours()).padStart(2, '0');
+                const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+                setTransferTime(`${currentHours}:${currentMinutes}`);
                 setStep(3);
             };
 
-            const handleFileChange = (e) => {
-                const selectedFile = e.target.files[0];
-                if (selectedFile) {
-                    setFile(selectedFile);
-                    setFileNameText(selectedFile.name);
-                }
+            // ดึงข้อความรายละเอียดบัญชีตามที่แอดมินตั้งค่าไว้
+            const getPaymentInfoText = () => {
+                if (paymentMethod === "bank") return settings.pageB || "";
+                if (paymentMethod === "wallet") return settings.pageC || "";
+                return settings.pageD || "";
             };
 
-            // ช่วยโหลดภาพสลิปเป็นแบบ Promise เพื่อดักจับ Error ได้สมบูรณ์ขึ้น
-            const readFileAsDataURL = (fileToRead) => {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result);
-                    reader.onerror = (error) => reject(error);
-                    reader.readAsDataURL(fileToRead);
-                });
+            // ดึงเลขบัญชีหรือเบอร์โทรศัพท์ออกจากข้อความโดยอัตโนมัติด้วย Regex
+            const extractAccountNumber = () => {
+                const infoText = getPaymentInfoText();
+                // ค้นหาตัวเลขเรียงกัน 10-12 หลัก (รวมถึงแบบมีขีดคั่น เช่น 123-4-56789-0)
+                const match = infoText.match(/(\d[\s-]?){10,12}/g);
+                return match ? match[0].trim() : "";
             };
 
-            const handleUploadAndSubmit = async (e) => {
+            const handleCopyText = (textToCopy) => {
+                if (!textToCopy) return;
+                navigator.clipboard.writeText(textToCopy);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            const handleFormSubmit = async (e) => {
                 e.preventDefault();
-                if (!file || !transferTime) {
-                    alert("กรุณากรอกเวลาโอนและแนบรูปสลิปให้ครบถ้วน");
+                if (!transferDate || !transferTime) {
+                    alert("กรุณากรอกวันที่และเวลาที่ทำการโอนเงินให้ครบถ้วน");
                     return;
                 }
 
                 setLoading(true);
-                setStatusMsg("กำลังส่งภาพหลักฐานไปยังระบบคลาวด์...");
+                setStatusMsg("กำลังส่งข้อมูลแจ้งโอนเงิน...");
 
                 try {
-                    // แปลงและโหลดรูปแบบ Asynchronous ปลอดภัยจากอาการหน้าจอดับ
-                    const base64Data = await readFileAsDataURL(file);
-                    
-                    // ส่งรูปขึ้น Google Drive ผ่าน GAS ด้วยตัวแปรที่ตรงกับ backend.gs ทุกคีย์
-                    const response = await fetch(GAS_WEB_APP_URL, {
-                        method: "POST",
-                        body: JSON.stringify({
-                            action: "upload_slip",
-                            mimeType: file.type,
-                            fileName: `slip_${tgUser.id}_${Date.now()}.png`, // ปรับใช้ตัวแปร N ตัวใหญ่ตาม backend.gs
-                            base64: base64Data // ปรับใช้ตัวแปรชื่อ base64 ตามหลังบ้าน
-                        })
+                    // ส่งข้อมูลบันทึกเข้า Firestore โดยตรง (ตัดขั้นตอนอัปโหลดภาพขึ้น GAS Drive ออก)
+                    await db.collection("transactions").add({
+                        userId: tgUser.id.toString(),
+                        userName: tgUser.first_name || "Guest User",
+                        package: selectedPkg,
+                        paymentMethod: paymentMethod,
+                        transferDate: transferDate, // วันที่ที่โอน เช่น 2026-07-09
+                        transferTime: transferTime, // เวลาที่โอน เช่น 14:35
+                        status: "pending",
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
                     });
-                    
-                    if (!response.ok) {
-                        throw new Error("ไม่สามารถเชื่อมต่อระบบอัปโหลดหลักฐานของ Google ได้");
-                    }
 
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        setStatusMsg("กำลังบันทึกข้อมูลคิวคำขอ...");
-                        
-                        // บันทึกข้อมูลและ URL รูปสลิปลง Firestore
-                        await db.collection("transactions").add({
-                            userId: tgUser.id.toString(),
-                            userName: tgUser.first_name || "Guest User",
-                            package: selectedPkg,
-                            paymentMethod: paymentMethod,
-                            transferTime: transferTime,
-                            slipUrl: result.fileUrl, // แมตช์กับคีย์ fileUrl ที่ GAS คืนกลับมา
-                            status: "pending",
-                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-
-                        setStep(4);
-                    } else {
-                        throw new Error(result.error || "ระบบจัดเก็บภาพ Google Drive ล้มเหลว");
-                    }
+                    setStep(4);
                 } catch (error) {
                     alert("เกิดข้อผิดพลาดในการส่งข้อมูล: " + error.message);
                 } finally {
                     setLoading(false);
                 }
             };
+
+            const targetAccount = extractAccountNumber();
 
             return (
                 <div class="p-6 max-w-md mx-auto min-h-screen flex flex-col justify-between">
@@ -297,50 +277,62 @@
                                 </span>
                             </div>
 
-                            {/* Payment details box */}
-                            <div class="bg-neutral-50 border border-neutral-200/40 p-4 rounded-2xl text-xs text-neutral-600 space-y-2 whitespace-pre-line leading-relaxed font-semibold">
-                                {paymentMethod === "bank" && (settings.pageB || "ข้อมูลธนาคารเพื่อการโอนชำระ\nกรุณาตั้งค่าบัญชีในแผงจัดการระบบ")}
-                                {paymentMethod === "wallet" && (settings.pageC || "ข้อมูลทรูมันนี่วอลเล็ต\nกรุณาตั้งค่าบัญชีในแผงจัดการระบบ")}
-                                {paymentMethod === "paypal" && (settings.pageD || "ข้อมูลหรืออีเมลสำหรับโอนผ่าน PayPal\nกรุณาตั้งค่าบัญชีในแผงจัดการระบบ")}
+                            {/* 💳 ส่วนแสดงเลขบัญชีและข้อมูลชำระเงินขนาดใหญ่พรีเมียม */}
+                            <div class="bg-neutral-950 text-white p-5 rounded-2xl space-y-4 shadow-xl border border-neutral-800 relative overflow-hidden">
+                                <div class="absolute -right-6 -top-6 w-20 h-20 bg-white/5 rounded-full blur-lg"></div>
                                 
-                                <div class="border-t border-neutral-200/60 pt-3 mt-3 flex justify-between items-center">
-                                    <span class="text-[10px] text-neutral-400 uppercase tracking-wider font-bold">ยอดเงินที่ต้องโอน</span>
-                                    <span class="text-base font-black text-black">฿{selectedPkg?.price}</span>
+                                <div class="space-y-1">
+                                    <span class="text-[9px] text-neutral-400 uppercase tracking-widest font-black">บัญชีที่ต้องทำการโอนเงิน</span>
+                                    {targetAccount ? (
+                                        <div class="flex items-center justify-between pt-1">
+                                            <span class="text-2xl font-black tracking-wider text-white select-all">{targetAccount}</span>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleCopyText(targetAccount)} 
+                                                class="bg-white/10 hover:bg-white/20 text-[10px] text-neutral-200 font-bold px-3 py-1.5 rounded-lg border border-white/10 flex items-center transition-all active:scale-95"
+                                            >
+                                                <IconCopy /> {copied ? "คัดลอกแล้ว!" : "คัดลอก"}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <p class="text-sm font-semibold text-neutral-300">ไม่พบเลขบัญชี กรุณาตรวจสอบข้อความด้านล่าง</p>
+                                    )}
+                                </div>
+
+                                <div class="border-t border-white/10 pt-3 text-xs text-neutral-300 space-y-1 whitespace-pre-line leading-relaxed font-semibold">
+                                    {getPaymentInfoText()}
+                                    
+                                    <div class="border-t border-white/10 pt-3 mt-3 flex justify-between items-center">
+                                        <span class="text-[10px] text-neutral-400 uppercase tracking-wider font-bold">ยอดเงินที่ต้องโอน</span>
+                                        <span class="text-lg font-black text-white">฿{selectedPkg?.price}</span>
+                                    </div>
                                 </div>
                             </div>
                             
-                            <form onSubmit={handleUploadAndSubmit} class="space-y-4">
-                                <div class="space-y-1.5">
-                                    <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">เวลาที่โอนเงินในสลิป</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="ตัวอย่างเช่น 14:35 น." 
-                                        value={transferTime} 
-                                        onChange={e => setTransferTime(e.target.value)} 
-                                        class="w-full border border-neutral-200 rounded-xl p-3 text-sm focus:outline-none focus:border-black transition-all bg-neutral-50/50 font-medium" 
-                                        required 
-                                    />
-                                </div>
-
-                                <div class="space-y-1.5">
-                                    <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">อัปโหลดภาพหลักฐานการโอน</label>
-                                    <div class="relative border-2 border-dashed border-neutral-200 rounded-2xl p-4 text-center hover:bg-neutral-50 transition-colors cursor-pointer bg-neutral-50/20">
+                            <form onSubmit={handleFormSubmit} class="space-y-4">
+                                <p class="text-[10px] font-extrabold text-neutral-400 uppercase tracking-wider text-center border-b pb-2">เมื่อโอนสำเร็จ กรุณาระบุข้อมูลเพื่อตรวจสอบ</p>
+                                
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="space-y-1.5">
+                                        <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">วันที่โอนเงิน</label>
                                         <input 
-                                            type="file" 
-                                            accept="image/*" 
-                                            onChange={handleFileChange} 
-                                            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                                            type="date" 
+                                            value={transferDate} 
+                                            onChange={e => setTransferDate(e.target.value)} 
+                                            class="w-full border border-neutral-200 rounded-xl p-3 text-sm focus:outline-none focus:border-black transition-all bg-neutral-50/50 font-semibold" 
                                             required 
                                         />
-                                        <div class="space-y-1">
-                                            <div class="flex justify-center"><IconUpload /></div>
-                                            <p class="text-xs font-bold text-neutral-700">
-                                                {file ? "✓ แนบหลักฐานแล้ว" : "เลือกภาพสลิปโอนเงิน"}
-                                            </p>
-                                            <p class="text-[10px] text-neutral-400 max-w-[180px] mx-auto overflow-hidden text-ellipsis whitespace-nowrap">
-                                                {file ? file.name : "รองรับไฟล์ภาพ .png, .jpg, .jpeg"}
-                                            </p>
-                                        </div>
+                                    </div>
+
+                                    <div class="space-y-1.5">
+                                        <label class="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">เวลาที่โอนเงิน</label>
+                                        <input 
+                                            type="time" 
+                                            value={transferTime} 
+                                            onChange={e => setTransferTime(e.target.value)} 
+                                            class="w-full border border-neutral-200 rounded-xl p-3 text-sm focus:outline-none focus:border-black transition-all bg-neutral-50/50 font-semibold" 
+                                            required 
+                                        />
                                     </div>
                                 </div>
 
@@ -349,7 +341,7 @@
                                     disabled={loading} 
                                     class="w-full bg-neutral-900 text-white rounded-2xl p-3.5 font-bold text-xs uppercase tracking-wider hover:bg-black disabled:bg-neutral-300 shadow-md shadow-black/10 transition-all active:scale-[0.98] mt-2"
                                 >
-                                    {loading ? statusMsg : "ยืนยันและแจ้งโอนเงิน"}
+                                    {loading ? statusMsg : "ยืนยันการโอนเงิน"}
                                 </button>
                             </form>
                         </div>
@@ -363,7 +355,7 @@
                             <div class="space-y-2">
                                 <h2 class="text-xl font-bold text-neutral-900">ส่งข้อมูลเรียบร้อยแล้ว</h2>
                                 <p class="text-xs text-neutral-400 max-w-[240px] mx-auto leading-relaxed font-medium">
-                                    ระบบได้บันทึกประวัติและส่งใบแจ้งโอนให้แอดมินตรวจสอบแล้ว กรุณารอรับลิงก์เชิญเข้ากลุ่มทางช่องทางแชทของ Telegram Bot ครับ
+                                    ระบบได้บันทึกประวัติการโอนเงินของคุณเรียบร้อยแล้ว กรุณารอรับลิงก์เชิญเข้ากลุ่มทางช่องทางแชทของ Telegram Bot หลังแอดมินอนุมัติสิทธิ์ครับ
                                 </p>
                             </div>
                         </div>
@@ -545,7 +537,7 @@
         };
 
         const handleReject = async (tx) => {
-            const reason = prompt("ระบุเหตุผลการปฏิเสธหลักฐาน (ข้อความนี้จะถูกส่งไปที่บอทฝั่งลูกค้า):", "หลักฐานไม่ถูกต้องหรือภาพซ้ำ");
+            const reason = prompt("ระบุเหตุผลการปฏิเสธหลักฐาน (ข้อความนี้จะถูกส่งไปที่บอทฝั่งลูกค้า):", "หลักฐานข้อมูลเวลาโอนเงินไม่ตรงกับในระบบ");
             if (reason === null) return;
             
             setLoadingId(tx.id);
@@ -636,21 +628,27 @@
                                             </div>
                                             <div class="text-right">
                                                 <p class="font-black text-neutral-900">฿{tx.package?.price}</p>
-                                                <p class="text-[10px] text-neutral-400">โอน: {tx.transferTime} น. ({tx.paymentMethod})</p>
+                                                <p class="text-[10px] text-neutral-400">แจ้งโอนผ่าน: {tx.paymentMethod}</p>
                                             </div>
                                         </div>
                                         
-                                        <div class="border border-neutral-200 rounded-lg overflow-hidden">
-                                            <a href={tx.slipUrl} target="_blank" rel="noopener noreferrer" class="block text-center py-2 bg-neutral-100 text-xs font-bold text-neutral-700 hover:bg-neutral-200">
-                                                🔍 คลิกตรวจสอบภาพสลิปใบโอนเงิน
-                                            </a>
+                                        {/* 📅 ปรับรูปแบบการแจ้งเตือนแบบไร้สลิปให้แอดมินตรวจสอบง่ายขึ้น */}
+                                        <div class="bg-neutral-50 border border-neutral-200/60 p-4 rounded-xl text-xs space-y-1.5 font-semibold">
+                                            <p class="text-neutral-500 uppercase text-[9px] tracking-wider font-extrabold mb-1">ข้อมูลเวลาโอนที่แจ้งเข้ามา</p>
+                                            <div class="grid grid-cols-2 gap-2 text-neutral-800">
+                                                <div>📅 วันที่โอน: <span class="font-bold text-black">{tx.transferDate || "N/A"}</span></div>
+                                                <div>⏰ เวลาโอน: <span class="font-bold text-black">{tx.transferTime || "N/A"} น.</span></div>
+                                            </div>
+                                            <div class="border-t border-neutral-200/50 pt-2 mt-2 text-[10px] text-neutral-400 italic">
+                                                ⚠️ โปรดตรวจสอบยอดเงินในแอปพลิเคชันบัญชีของคุณตามวันและเวลาที่ลูกค้าระบุไว้ด้านบน
+                                            </div>
                                         </div>
 
                                         <div class="flex space-x-2 pt-1.5">
                                             <button 
                                                 onClick={() => handleApprove(tx)} 
                                                 disabled={loadingId !== null} 
-                                                class="flex-1 bg-black text-white rounded-xl p-2.5 font-bold text-xs hover:bg-neutral-900 disabled:bg-neutral-300 transition-colors"
+                                                class="flex-1 bg-black text-white rounded-xl p-2.5 font-bold text-xs hover:bg-neutral-800 disabled:bg-neutral-300 transition-colors"
                                             >
                                                 {loadingId === tx.id ? "กำลังส่ง..." : "อนุมัติ"}
                                             </button>
@@ -822,9 +820,9 @@
                         ],
                         textSettings: {
                             pageA: "เลือกแผนสมาชิกสมาชิก VIP Group ที่คุณสะดวกและทำรายการด้านล่างได้ทันที",
-                            pageB: "โอนผ่านบัญชีธนาคารกสิกรไทย\nเลขบัญชี: 123-4-56789-0\nชื่อบัญชี: บจก. พรีเมียม ออฟฟิเชียล\n(กรุณาโอนเงินตรงตามยอดและส่งสลิปเพื่ออนุมัติสิทธิ์อัตโนมัติ)",
+                            pageB: "โอนผ่านบัญชีธนาคารกสิกรไทย\nเลขบัญชี: 123-4-56789-0\nชื่อบัญชี: บจก. พรีเมียม ออฟฟิเชียล\n(กรุณาโอนเงินตรงตามยอดและกรอกข้อมูลวันเวลาเพื่อตรวจสอบสิทธิ์)",
                             pageC: "โอนผ่าน TrueMoney Wallet\nเบอร์บัญชี: 080-123-4567\nชื่อบัญชี: บจก. พรีเมียม ออฟฟิเชียล",
-                            pageD: "ชำระเงินผ่านระบบ PayPal\nส่งยอดมาที่อีเมล: payment@premium.com\n(กรุณาแนบภาพสลิปทำรายการด้านล่าง)"
+                            pageD: "ชำระเงินผ่านระบบ PayPal\nส่งยอดมาที่อีเมล: payment@premium.com\n(กรุณาระบุข้อมูลการโอนเงินด้านล่าง)"
                         }
                     };
                     db.collection("system").doc("settings").set(defaultSettings);
