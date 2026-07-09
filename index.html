@@ -151,6 +151,16 @@
                 }
             };
 
+            // ช่วยโหลดภาพสลิปเป็นแบบ Promise เพื่อดักจับ Error ได้สมบูรณ์ขึ้น
+            const readFileAsDataURL = (fileToRead) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = (error) => reject(error);
+                    reader.readAsDataURL(fileToRead);
+                });
+            };
+
             const handleUploadAndSubmit = async (e) => {
                 e.preventDefault();
                 if (!file || !transferTime) {
@@ -162,46 +172,47 @@
                 setStatusMsg("กำลังส่งภาพหลักฐานไปยังระบบคลาวด์...");
 
                 try {
-                    const reader = new FileReader();
-                    reader.readAsDataURL(file);
-                    reader.onloadend = async () => {
-                        const base64Data = reader.result;
-                        
-                        // ส่งรูปขึ้น Google Drive ผ่าน GAS
-                        const response = await fetch(GAS_WEB_APP_URL, {
-                            method: "POST",
-                            body: JSON.stringify({
-                                action: "upload_slip",
-                                mimeType: file.type,
-                                filename: `slip_${tgUser.id}_${Date.now()}.png`,
-                                base64: base64Data
-                            })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            setStatusMsg("กำลังบันทึกข้อมูลคิวคำขอ...");
-                            
-                            // บันทึกข้อมูลและ URL รูปสลิปลง Firestore
-                            await db.collection("transactions").add({
-                                userId: tgUser.id.toString(),
-                                userName: tgUser.first_name || "Guest User",
-                                package: selectedPkg,
-                                paymentMethod: paymentMethod,
-                                transferTime: transferTime,
-                                slipUrl: result.fileUrl,
-                                status: "pending",
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                            });
+                    // แปลงและโหลดรูปแบบ Asynchronous ปลอดภัยจากอาการหน้าจอดับ
+                    const base64Data = await readFileAsDataURL(file);
+                    
+                    // ส่งรูปขึ้น Google Drive ผ่าน GAS ด้วยตัวแปรที่ตรงกับ backend.gs ทุกคีย์
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            action: "upload_slip",
+                            mimeType: file.type,
+                            fileName: `slip_${tgUser.id}_${Date.now()}.png`, // ปรับใช้ตัวแปร N ตัวใหญ่ตาม backend.gs
+                            base64: base64Data // ปรับใช้ตัวแปรชื่อ base64 ตามหลังบ้าน
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error("ไม่สามารถเชื่อมต่อระบบอัปโหลดหลักฐานของ Google ได้");
+                    }
 
-                            setStep(4);
-                        } else {
-                            throw new Error("ล้มเหลวในการบันทึกรูปภาพสลิป");
-                        }
-                    };
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        setStatusMsg("กำลังบันทึกข้อมูลคิวคำขอ...");
+                        
+                        // บันทึกข้อมูลและ URL รูปสลิปลง Firestore
+                        await db.collection("transactions").add({
+                            userId: tgUser.id.toString(),
+                            userName: tgUser.first_name || "Guest User",
+                            package: selectedPkg,
+                            paymentMethod: paymentMethod,
+                            transferTime: transferTime,
+                            slipUrl: result.fileUrl, // แมตช์กับคีย์ fileUrl ที่ GAS คืนกลับมา
+                            status: "pending",
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                        setStep(4);
+                    } else {
+                        throw new Error(result.error || "ระบบจัดเก็บภาพ Google Drive ล้มเหลว");
+                    }
                 } catch (error) {
-                    alert("เกิดข้อผิดพลาด: " + error.message);
+                    alert("เกิดข้อผิดพลาดในการส่งข้อมูล: " + error.message);
                 } finally {
                     setLoading(false);
                 }
